@@ -5,6 +5,9 @@ go 1.27.1
 require (
 	fyne.io/fyne/v2 v2.8.1
 	fyne.io/systray v1.12.3-0.20260810170012-af4e8e793ec4
+	github.com/arran4/golang-ical v0.3.6
+	github.com/jezek/xgb v1.3.1
+	github.com/teambition/rrule-go v1.8.2
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.297.0
@@ -40,7 +43,6 @@ require (
 	github.com/hack-pad/go-indexeddb v0.3.2 // indirect
 	github.com/hack-pad/safejs v0.1.0 // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
-	github.com/jezek/xgb v1.3.1 // indirect
 	github.com/jsummers/gobmp v0.0.0-20230614200233-a9de23ed2e25 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect

@@ -50,7 +50,9 @@ Data flows one way: provider -> engine -> callbacks -> UI.
 cmd/meeting-blaster    wiring, flags, thread ownership
 internal/
   calendar/            Event, Provider - no provider-specific code
-    google/            Google Calendar + OAuth (the only provider today)
+    google/            Google Calendar + OAuth
+    ics/               iCalendar subscriptions (webcal / https / .ics files)
+    multi/             fans Provider out over several sources at once
   engine/              poll loop, "what is next", when to alert
   overlay/             the full-screen alert
   screens/             monitor enumeration and placement (X11)
@@ -71,16 +73,36 @@ Fyne must go through `fyne.Do`. `overlay` and `prefs` already wrap their own
 public methods, so they are safe to call from anywhere; new UI code must do
 the same.
 
-`ui.Run()` keeps running with zero windows open, so no hidden keep-alive
-window is needed.
+`ui.Run()` keeps running with zero windows open on Linux, so no hidden
+keep-alive window is needed. Note that Fyne's macOS driver does *not* behave
+this way: there, `ui.Run()` returns once the last window closes, so the
+process exits after the first overlay auto-dismiss. Unfixed, along with the
+rest of macOS support.
+
+`tray.Update` runs on the engine goroutine while `tray.Ready` runs on
+systray's, so the menu items are published behind a mutex-guarded `ready`
+flag and `Update` returns early before that. A local `.ics` feed polls in
+microseconds, so the first `Update` really does arrive before the menu
+exists; dereferencing it crashed the app before it showed an icon.
 
 ### Adding a calendar provider
 
 Implement `calendar.Provider` in a sibling of `internal/calendar/google` and
-construct it in `main`. Nothing in `internal/calendar` may import a concrete
-provider. `Event.MeetingURL` should come from structured conference data where
-the API offers it, falling back to `meetlink.Detect` on location and
-description.
+add it to the `multi.Source` list in `main`. Nothing in `internal/calendar`
+may import a concrete provider. `Event.MeetingURL` should come from
+structured conference data where the API offers it, falling back to
+`meetlink.Detect` on location and description.
+
+Calendar IDs are namespaced by source (`google:`, `ics:`) in
+`internal/calendar/multi`, so a new provider needs its own key beside
+`config.SourceGoogle` / `config.SourceICS`, and `config.migrateCalendarIDs`
+is what keeps an existing watch selection matching after the prefixes
+changed.
+
+Both `multi` and `ics` treat partial failure as success: `engine.poll`
+discards the whole event set when the provider errors, so one dead feed or a
+Google token needing re-auth must not blank out a working source. Only when
+every source fails do they return an error. Preserve that.
 
 ### Alerting rules worth preserving
 
@@ -108,9 +130,15 @@ None of this exists for macOS or Windows.
 
 ## Platform support
 
-Linux is the only target built and tested here. macOS and Windows code is
-written and vets under `GOOS`, but has never been run - do not describe it as
-working.
+Linux is the only target actually *run* here. macOS and Windows are compiled
+and tested natively in CI (the `native` matrix job in `.github/workflows/ci.yml`
+builds every package, including `cmd/`, `overlay`, `prefs` and `tray`, with
+cgo enabled), so a per-OS file that stops compiling is caught - but nobody
+has used the app on either. Do not describe them as working. If a native job
+fails, fix the source; do not narrow the job back to a package subset.
+
+What running it on macOS did surface: the overlay appears and the alert
+fires, but the process exits when the overlay closes (see Threading above).
 
 The known asymmetry: `systray.SetTitle` is documented as Mac and Linux only.
 Windows has no text in the tray at all, so `setLabel` there folds the

@@ -33,11 +33,17 @@ type Actions struct {
 type Tray struct {
 	actions Actions
 
+	mu sync.Mutex
+	// The menu items do not exist until Ready runs on systray's own
+	// goroutine, while Update is called from the engine's. Publishing
+	// them under the mutex behind a ready flag is what makes that safe:
+	// a local .ics feed polls in microseconds, so the first Update
+	// genuinely can arrive first.
+	ready  bool
 	status *systray.MenuItem
 	join   *systray.MenuItem
 	agenda []*systray.MenuItem
 
-	mu sync.Mutex
 	// events maps each agenda slot to the event it currently shows, so a
 	// click resolves to the right meeting even as the list shifts.
 	events  map[int]calendar.Event
@@ -55,12 +61,12 @@ func (t *Tray) Ready() {
 	systray.SetIcon(iconPNG)
 	setLabel("", "meeting-blaster: starting…")
 
-	t.status = systray.AddMenuItem("Loading…", "")
-	t.status.Disable()
+	status := systray.AddMenuItem("Loading…", "")
+	status.Disable()
 
-	t.join = systray.AddMenuItem("Join next meeting", "Open the next meeting's link")
-	t.join.Hide()
-	go t.watch(t.join, func() {
+	join := systray.AddMenuItem("Join next meeting", "Open the next meeting's link")
+	join.Hide()
+	go t.watch(join, func() {
 		t.mu.Lock()
 		ev := t.nextEv
 		t.mu.Unlock()
@@ -71,11 +77,11 @@ func (t *Tray) Ready() {
 
 	systray.AddSeparator()
 
-	t.agenda = make([]*systray.MenuItem, agendaSlots)
-	for i := range t.agenda {
+	agenda := make([]*systray.MenuItem, agendaSlots)
+	for i := range agenda {
 		item := systray.AddMenuItem("", "")
 		item.Hide()
-		t.agenda[i] = item
+		agenda[i] = item
 
 		slot := i
 		go t.watch(item, func() {
@@ -111,6 +117,11 @@ func (t *Tray) Ready() {
 		}
 		systray.Quit()
 	})
+
+	t.mu.Lock()
+	t.status, t.join, t.agenda = status, join, agenda
+	t.ready = true
+	t.mu.Unlock()
 }
 
 // watch invokes fn each time the menu item is clicked, until its channel
@@ -124,11 +135,24 @@ func (t *Tray) watch(item *systray.MenuItem, fn func()) {
 // Update redraws the label and menu from engine state. It is called about
 // once a second, so it avoids redundant work when nothing has changed.
 func (t *Tray) Update(state engine.State, cfg config.Config, now time.Time) {
+	t.mu.Lock()
+	ready := t.ready
+	if ready {
+		t.nextEv = state.Next
+	}
+	t.mu.Unlock()
+
+	// Before Ready there is no tray item and no menu to draw into. The
+	// engine re-emits state every second, so the countdown catches up on
+	// the next tick rather than being lost.
+	if !ready {
+		return
+	}
+
 	label := Label(state, cfg, now)
 	setLabel(label, Tooltip(state, cfg, now))
 
 	t.mu.Lock()
-	t.nextEv = state.Next
 	changed := t.lastSet != agendaKey(state)
 	t.lastSet = agendaKey(state)
 	t.mu.Unlock()

@@ -132,6 +132,69 @@ func (w *Window) show(cfg config.Config) {
 
 	status := widget.NewLabel("")
 
+	// --- calendar subscriptions -----------------------------------------
+	// Edited in place on `edited`, which Save persists and hands to
+	// OnSave; the live ICS provider picks the list up from there.
+	sourceBox := container.NewVBox()
+
+	var redrawSources func()
+	redrawSources = func() {
+		sourceBox.RemoveAll()
+		if len(edited.ICSSources) == 0 {
+			sourceBox.Add(widget.NewLabel("No subscriptions yet."))
+		}
+		for _, src := range edited.ICSSources {
+			id := src.ID
+			name := src.Name
+			if name == "" {
+				name = src.URL
+			}
+			remove := widget.NewButton("Remove", func() {
+				for i := range edited.ICSSources {
+					if edited.ICSSources[i].ID == id {
+						edited.ICSSources = append(edited.ICSSources[:i], edited.ICSSources[i+1:]...)
+						break
+					}
+				}
+				// Save writes back selectedIDs(selected), so the
+				// watch entry has to go too; otherwise it lingers
+				// pointing at a subscription that no longer exists.
+				delete(selected, config.SourceICS+":"+id)
+				redrawSources()
+				sourceBox.Refresh()
+			})
+			sourceBox.Add(container.NewBorder(nil, nil, nil, remove, widget.NewLabel(name)))
+		}
+	}
+
+	urlEntry := widget.NewEntry()
+	urlEntry.SetPlaceHolder("webcal://… , https://….ics or /path/to/calendar.ics")
+
+	addSource := widget.NewButton("Add", func() {
+		url, err := config.NormalizeCalendarURL(urlEntry.Text)
+		if err != nil {
+			status.SetText(err.Error())
+			return
+		}
+		id := config.SourceID(url)
+		for _, src := range edited.ICSSources {
+			if src.ID == id {
+				status.SetText("Already subscribed to that calendar.")
+				return
+			}
+		}
+		edited.ICSSources = append(edited.ICSSources, config.ICSSource{ID: id, URL: url})
+		// An empty selection already means "watch everything", so
+		// seeding it here would narrow the watch list to this one feed.
+		if len(selected) > 0 {
+			selected[config.SourceICS+":"+id] = true
+		}
+		status.SetText("")
+		urlEntry.SetText("")
+		redrawSources()
+		sourceBox.Refresh()
+	})
+
 	save := widget.NewButton("Save", func() {
 		alert, err := minutes(alertEntry.Text)
 		if err != nil {
@@ -188,6 +251,12 @@ func (w *Window) show(cfg config.Config) {
 		hideDeclined,
 		widget.NewSeparator(),
 
+		widget.NewLabelWithStyle("Calendar subscriptions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		sourceBox,
+		container.NewBorder(nil, nil, nil, addSource, urlEntry),
+		widget.NewLabel("Subscriptions appear in the calendar list below after saving and restarting."),
+		widget.NewSeparator(),
+
 		widget.NewLabelWithStyle("Calendars", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewLabel("Unticking everything watches all calendars."),
 	)
@@ -208,6 +277,8 @@ func (w *Window) show(cfg config.Config) {
 		nil, nil,
 		scrolling,
 	)
+
+	redrawSources()
 
 	win.SetContent(content)
 	win.Show()

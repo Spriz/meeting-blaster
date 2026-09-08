@@ -137,6 +137,33 @@ neither is written yet. On those systems, launch the binary yourself.
 
 ## Setup
 
+There are two ways to get a calendar in. Pick either, or use both at once.
+
+### iCalendar subscription (no account, no API project)
+
+```sh
+./bin/meeting-blaster --add-calendar "webcal://example.com/your-calendar.ics"
+```
+
+`--add-calendar` also takes an `https://` feed URL or a path to a local `.ics`
+file. Most calendar services publish a private feed URL:
+
+| Service | Where to find it |
+| --- | --- |
+| Google Calendar | Settings -> your calendar -> "Secret address in iCal format" |
+| Outlook / M365 | Settings -> Calendar -> Shared calendars -> Publish |
+| Nextcloud | Calendar -> ... -> Copy subscription link |
+
+The catch: published feeds are refreshed by the provider on its own schedule,
+often only every few hours, so a meeting added this morning may not appear
+today. `poll_interval` cannot improve that — it controls how often the app
+refetches the feed, not how often the provider regenerates it.
+
+Subscriptions are also managed from **Preferences…** in the tray menu. Adding
+the first one needs a restart.
+
+### Google Calendar directly (live data)
+
 meeting-blaster talks to Google directly, so it needs its own OAuth client.
 This is a one-time setup and everything stays on your machine:
 
@@ -156,15 +183,19 @@ Then:
 The first run opens your browser to sign in. Read-only calendar scopes are
 requested; the app never writes to your calendar.
 
+If you have subscriptions configured, the app will not drag you to a browser
+on startup unless you ask: run `--login` when you want to connect Google.
+
 ## Usage
 
 ```sh
-meeting-blaster                # run it
-meeting-blaster --test-alert   # preview the full-screen alert
+meeting-blaster                 # run it
+meeting-blaster --add-calendar URL  # subscribe to an iCalendar feed
+meeting-blaster --test-alert    # preview the full-screen alert
 meeting-blaster --list-monitors # show connected displays
-meeting-blaster --login        # sign in again
-meeting-blaster --logout       # forget the stored token
-meeting-blaster -v             # debug logging
+meeting-blaster --login         # sign in to Google again
+meeting-blaster --logout        # forget the stored Google token
+meeting-blaster -v              # debug logging
 ```
 
 Settings live in `~/.config/meeting-blaster/config.json` and are editable from
@@ -177,7 +208,8 @@ Settings live in `~/.config/meeting-blaster/config.json` and are editable from
 | `overlay_timeout` | `0s` | auto-dismiss the overlay; `0` means never |
 | `overlay_monitors` | `primary` | which displays the alert blocks: `primary`, `all`, or `active` |
 | `poll_interval` | `2m` | how often the calendar is refetched |
-| `calendar_ids` | `[]` | which calendars to watch; empty means all |
+| `calendar_ids` | `[]` | which calendars to watch; empty means all. IDs are namespaced by source: `google:me@example.com`, `ics:9f2a1c0b` |
+| `ics_sources` | `[]` | iCalendar subscriptions; each is `{"id", "url", "name", "email"}`, and `--add-calendar` fills them in |
 | `use_24_hour` | `true` | clock format |
 | `title_max_len` | `30` | truncation for the tray label |
 | `hide_declined` | `true` | skip meetings you declined |
