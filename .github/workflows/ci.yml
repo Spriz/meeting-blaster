@@ -14,7 +14,7 @@ jobs:
     name: Build and test (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Fyne renders through GLFW, which needs the X11 development headers.
       - name: Install X11 headers
@@ -22,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xorg-dev
 
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v4
         with:
           cache: true
 
@@ -54,11 +54,8 @@ jobs:
     env:
       CGO_ENABLED: "1"
     steps:
-      - uses: actions/checkout@v5
-
-      # mise is skipped here: the Go version already lives in go.mod, and
-      # mise.toml's GOFLAGS=-tags=x11 only picks GLFW's Linux backend.
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
         with:
           go-version-file: go.mod
           cache: true
