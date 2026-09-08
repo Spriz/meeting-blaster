@@ -3,6 +3,8 @@
 Your next meeting in the system tray, and a full-screen alert before it
 starts. A [MeetingBar](https://meetingbar.app) equivalent that runs on Linux.
 
+**[spriz.github.io/meeting-blaster](https://spriz.github.io/meeting-blaster/)**
+
 ```
 ┌ Top bar ────────────────┐
 │ 📅 Standup in 12m       │
