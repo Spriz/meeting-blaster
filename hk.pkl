@@ -1,0 +1,18 @@
+amends "package://github.com/jdx/hk/releases/download/v1.58.1/hk@1.58.1#/Config.pkl"
+
+import "package://github.com/jdx/hk/releases/download/v1.58.1/hk@1.58.1#/Builtins.pkl"
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stage = true
+    stash = "git"
+    steps {
+      ["gofmt"] = Builtins.go_fmt
+      ["lint"] {
+        depends = List("gofmt")
+        check = "mise run lint"
+      }
+    }
+  }
+}
