@@ -11,6 +11,10 @@ on:
 
 permissions:
   contents: write
+  # Required to publish build provenance, which mise and other installers
+  # verify when downloading the release archive.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -61,6 +65,11 @@ jobs:
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > checksums.txt
           ls -la
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/*.tar.gz
 
       - name: Publish release
         env:

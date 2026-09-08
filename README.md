@@ -44,12 +44,24 @@ A minute before the meeting, the whole screen goes to this:
 ### With mise (no compiler needed)
 
 ```sh
-mise use -g ubi:Spriz/meeting-blaster
+mise use -g github:Spriz/meeting-blaster
 ```
 
 This pulls a prebuilt binary from the latest
 [release](https://github.com/Spriz/meeting-blaster/releases) and puts it on
 your PATH. Nothing to build, no X11 headers required.
+
+If mise reports `no versions found ... matching date filter`, it is holding
+back a release that is newer than its `minimum_release_age` setting — a
+supply-chain precaution, not a broken download. Either wait, or opt in
+explicitly:
+
+```sh
+MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:Spriz/meeting-blaster
+```
+
+Release archives carry GitHub build provenance, which mise verifies during
+install.
 
 ### From a release archive
 
