@@ -44,26 +44,42 @@ jobs:
       - name: Build
         run: go build ./...
 
-  cross-compile:
-    name: Vet portable packages for ${{ matrix.goos }}
-    runs-on: ubuntu-latest
+  native:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        goos: [darwin, windows]
+        os: [macos-latest, windows-latest]
+    env:
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3
+
+      # mise is skipped here: the Go version already lives in go.mod, and
+      # mise.toml's GOFLAGS=-tags=x11 only picks GLFW's Linux backend.
+      - uses: actions/setup-go@v6
         with:
+          go-version-file: go.mod
           cache: true
 
-      # The GUI packages need a CGO toolchain per platform, which this job
-      # does not have. Vetting the portable packages still catches the common
-      # breakage: a build-tagged file that stops compiling for its own GOOS.
-      - name: Vet non-GUI packages
-        env:
-          GOOS: ${{ matrix.goos }}
-          CGO_ENABLED: "0"
-        run: |
-          go vet ./internal/browser/ ./internal/notify/ ./internal/meetlink/ \
-                 ./internal/engine/ ./internal/config/ ./internal/calendar/...
+      # Fyne needs a C toolchain. macOS runners ship the Xcode command line
+      # tools; Windows runners ship Mingw-w64. Print it so a runner image
+      # that drops the compiler fails here with an obvious message rather
+      # than deep inside the linker.
+      - name: Show C compiler
+        run: ${{ runner.os == 'Windows' && 'gcc --version' || 'clang --version' }}
+
+      - name: Vet
+        run: go vet ./...
+
+      # -race needs cgo, which this job enables, and is supported on both
+      # darwin/arm64 and windows/amd64.
+      - name: Test
+        run: go test -race ./...
+
+      # The first time cmd/, overlay, prefs, tray, singleton and screens are
+      # compiled for these platforms in CI. If a per-OS file does not
+      # compile, fix the source rather than narrowing this job.
+      - name: Build
+        run: go build ./...
