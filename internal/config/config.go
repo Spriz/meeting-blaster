@@ -1,0 +1,191 @@
+// Package config handles on-disk user settings.
+//
+// Settings live in a plain JSON file under the XDG config directory so they
+// can be edited by hand. Secrets never go here - see internal/tokens.
+package config
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// AppName is used for config/cache directory names and the keyring service.
+const AppName = "meeting-blaster"
+
+// Config is the full set of user-tunable settings.
+type Config struct {
+	// CalendarIDs limits which calendars are watched. Empty means all.
+	CalendarIDs []string `json:"calendar_ids"`
+
+	// AlertLead is how long before a meeting the full-screen overlay
+	// appears. This is the app's headline feature: it is deliberately
+	// impossible to miss, so the default is short enough to be actionable
+	// but long enough to walk back to your desk.
+	AlertLead Duration `json:"alert_lead"`
+
+	// NotifyLead is how long before a meeting a normal desktop
+	// notification fires. Zero disables it.
+	NotifyLead Duration `json:"notify_lead"`
+
+	// OverlayTimeout auto-dismisses the overlay after this long. Zero
+	// leaves it up until dismissed.
+	OverlayTimeout Duration `json:"overlay_timeout"`
+
+	// PollInterval is how often the calendar is refetched.
+	PollInterval Duration `json:"poll_interval"`
+
+	// Use24Hour selects 15:04 over 3:04 PM.
+	Use24Hour bool `json:"use_24_hour"`
+
+	// TitleMaxLen truncates long event titles in the tray label. The top
+	// bar is narrow; MeetingBar does the same.
+	TitleMaxLen int `json:"title_max_len"`
+
+	// HideDeclined drops events the user responded "no" to.
+	HideDeclined bool `json:"hide_declined"`
+
+	// JoinBrowser overrides the browser used for join links. Empty uses
+	// the system default handler.
+	JoinBrowser string `json:"join_browser"`
+}
+
+// Default returns the settings a fresh install starts with.
+func Default() Config {
+	return Config{
+		AlertLead:      Duration(1 * time.Minute),
+		NotifyLead:     Duration(5 * time.Minute),
+		OverlayTimeout: Duration(0),
+		PollInterval:   Duration(2 * time.Minute),
+		Use24Hour:      true,
+		TitleMaxLen:    30,
+		HideDeclined:   true,
+	}
+}
+
+// TimeLayout is the clock format implied by Use24Hour.
+func (c Config) TimeLayout() string {
+	if c.Use24Hour {
+		return "15:04"
+	}
+	return "3:04 PM"
+}
+
+// Watches reports whether the given calendar is selected.
+func (c Config) Watches(calendarID string) bool {
+	if len(c.CalendarIDs) == 0 {
+		return true
+	}
+	for _, id := range c.CalendarIDs {
+		if id == calendarID {
+			return true
+		}
+	}
+	return false
+}
+
+// Dir is the directory holding config.json.
+func Dir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("locate user config dir: %w", err)
+	}
+	return filepath.Join(base, AppName), nil
+}
+
+// Path is the full path to config.json.
+func Path() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil
+}
+
+// Load reads settings from disk, returning defaults if none are saved yet.
+// Unknown fields are ignored and missing fields keep their default, so a
+// config written by an older build still loads.
+func Load() (Config, error) {
+	cfg := Default()
+
+	path, err := Path()
+	if err != nil {
+		return cfg, err
+	}
+
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return cfg, nil
+	}
+	if err != nil {
+		return cfg, fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Default(), fmt.Errorf("parse %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// Save writes settings to disk, creating the directory if needed.
+func Save(cfg Config) error {
+	dir, err := Dir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	data = append(data, '\n')
+
+	path := filepath.Join(dir, "config.json")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	return nil
+}
+
+// Duration is a time.Duration that round-trips through JSON as a readable
+// string such as "5m", rather than a nanosecond integer.
+type Duration time.Duration
+
+// Std converts back to the standard library type.
+func (d Duration) Std() time.Duration { return time.Duration(d) }
+
+// MarshalJSON implements json.Marshaler.
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
+}
+
+// UnmarshalJSON implements json.Unmarshaler, accepting either a duration
+// string ("5m") or a bare number of seconds.
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		parsed, err := time.ParseDuration(s)
+		if err != nil {
+			return fmt.Errorf("parse duration %q: %w", s, err)
+		}
+		*d = Duration(parsed)
+		return nil
+	}
+
+	var secs float64
+	if err := json.Unmarshal(data, &secs); err != nil {
+		return fmt.Errorf("duration must be a string like \"5m\" or a number of seconds")
+	}
+	*d = Duration(time.Duration(secs * float64(time.Second)))
+	return nil
+}

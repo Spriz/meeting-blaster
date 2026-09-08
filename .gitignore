@@ -1,0 +1,7 @@
+/bin/
+*.log
+
+# Holds the Google OAuth client. Not secret in the cryptographic sense - an
+# installed-app client ships inside every copy of the binary - but it is
+# account-specific and has no business in version control.
+credentials.json

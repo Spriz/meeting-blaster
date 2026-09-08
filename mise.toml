@@ -1,0 +1,47 @@
+[tools]
+go = "1.27.1"
+
+[env]
+CGO_ENABLED = "1"
+# Fyne's GLFW builds both X11 and Wayland backends unless told otherwise.
+# Pinning to X11 keeps the build free of Wayland dev headers, and the alert
+# overlay raises itself more reliably through XWayland than through Wayland,
+# which restricts a client's ability to put itself on top.
+GOFLAGS = "-tags=x11"
+
+[tasks.build]
+description = "Build the binary into ./bin"
+run = "go build -ldflags \"-X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o bin/meeting-blaster ./cmd/meeting-blaster"
+
+[tasks.run]
+description = "Build and run"
+depends = ["build"]
+run = "./bin/meeting-blaster"
+
+[tasks.test]
+description = "Run all tests"
+run = "go test ./..."
+
+[tasks."test:watch"]
+description = "Run one package's tests, e.g. mise run test:watch ./internal/engine"
+run = "go test -v -count=1"
+
+[tasks.lint]
+description = "Vet and check formatting"
+run = [
+  "go vet ./...",
+  "test -z \"$(gofmt -l cmd internal)\" || { echo 'gofmt needed:'; gofmt -l cmd internal; exit 1; }",
+]
+
+[tasks.alert]
+description = "Show a sample full-screen alert without waiting for a meeting"
+depends = ["build"]
+run = "./bin/meeting-blaster --test-alert"
+
+[tasks.login]
+description = "Sign in to Google again"
+depends = ["build"]
+run = "./bin/meeting-blaster --login"
+
+[tasks.tidy]
+run = "go mod tidy"
