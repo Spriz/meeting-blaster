@@ -111,3 +111,34 @@ func TestLogURLKeepsLocalPaths(t *testing.T) {
 		t.Errorf("logURL(remote) = %q, want scheme and host only", got)
 	}
 }
+
+func TestMalformedRemoteFeedSecretIsNotLogged(t *testing.T) {
+	const feed = "https://calendar.example/%zz-private-feed.ics"
+
+	var buf bytes.Buffer
+	p := New([]Source{{ID: "malformed", URL: feed}}, slog.New(slog.NewTextHandler(&buf, nil)))
+	_, err := p.Events(context.Background(), time.Now(), time.Now().Add(time.Hour))
+	if err == nil {
+		t.Fatal("expected malformed feed URL to fail")
+	}
+
+	for label, text := range map[string]string{"error": err.Error(), "log": buf.String()} {
+		if strings.Contains(text, "zz-private-feed") {
+			t.Errorf("%s leaked the feed credential: %s", label, text)
+		}
+	}
+	if !strings.Contains(err.Error(), "<unparseable feed url>") {
+		t.Errorf("error = %q, want a redacted malformed-feed marker", err)
+	}
+}
+
+func TestLocalPathKeepsWindowsDrivePaths(t *testing.T) {
+	for _, raw := range []string{`C:\cal.ics`, `C:/cal.ics`} {
+		t.Run(raw, func(t *testing.T) {
+			path, ok := localPath(raw)
+			if !ok || path != raw {
+				t.Errorf("localPath(%q) = (%q, %t), want (%q, true)", raw, path, ok, raw)
+			}
+		})
+	}
+}

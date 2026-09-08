@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	ical "github.com/arran4/golang-ical"
@@ -87,25 +88,33 @@ func scrubbed(err error) error {
 	return err
 }
 
-// localPath reports whether the source lives on disk, and where. Anything
-// without an http(s) scheme is a path: config.NormalizeCalendarURL has
-// already turned a bare path into an absolute one.
+// localPath reports whether the source lives on disk, and where. Bare paths,
+// file URLs, and Windows drive-letter paths are local; other URL-like sources
+// use the remote path so malformed URLs are redacted instead of leaking.
 func localPath(raw string) (string, bool) {
 	u, err := url.Parse(raw)
 	if err != nil {
+		return raw, !isURLLike(raw)
+	}
+	if len(u.Scheme) == 1 {
 		return raw, true
 	}
 	switch u.Scheme {
-	case "http", "https":
-		return "", false
+	case "":
+		return raw, true
 	case "file":
 		if u.Path != "" {
 			return u.Path, true
 		}
 		return u.Opaque, true
 	default:
-		return raw, true
+		return "", false
 	}
+}
+
+func isURLLike(raw string) bool {
+	colon := strings.IndexByte(raw, ':')
+	return colon > 1 && !strings.ContainsAny(raw[:colon], `/\`)
 }
 
 func (p *Provider) loadFile(key, path string, prev *cached) (*cached, error) {
@@ -138,7 +147,7 @@ func (p *Provider) loadHTTP(ctx context.Context, rawURL string, prev *cached) (*
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return prev, fmt.Errorf("fetch %s: %w", safe, scrubbed(err))
+		return prev, fmt.Errorf("fetch %s: invalid calendar feed URL", safe)
 	}
 	req.Header.Set("Accept", "text/calendar")
 	if prev != nil {
