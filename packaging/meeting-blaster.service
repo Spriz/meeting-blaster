@@ -1,0 +1,22 @@
+[Unit]
+Description=meeting-blaster — next meeting in the tray, with a full-screen alert
+Documentation=https://github.com/Spriz/meeting-blaster
+
+# Tie the app to the graphical session: it needs a display and the session
+# D-Bus, and it should stop when the session does.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+# Without an OAuth client the app exits non-zero by design. Give up after a
+# few tries rather than restarting forever.
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/meeting-blaster
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

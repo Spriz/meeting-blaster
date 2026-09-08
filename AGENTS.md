@@ -91,6 +91,21 @@ description.
   `TestAlertFiresExactlyOnce` guards this - keep it passing.
 - `Filter` drops all-day events; they are never "the next meeting".
 
+## Running in the background
+
+`packaging/meeting-blaster.service` is a systemd **user** unit, wanted by
+`graphical-session.target` - the app needs a display and the session D-Bus,
+both of which are already in the systemd user environment on GNOME. It is
+installed and controlled through `scripts/service.sh`.
+
+Enabling the service deletes the autostart `.desktop`, because the two would
+each launch a copy. `internal/singleton` is the backstop: an flock on a file
+in `XDG_RUNTIME_DIR`, released by the kernel when the process dies, so a
+crash cannot strand a stale lock. Without it, two copies means two tray icons
+and two full-screen alerts.
+
+None of this exists for macOS or Windows.
+
 ## Platform support
 
 Linux is the only target built and tested here. macOS and Windows code is

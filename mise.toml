@@ -54,6 +54,23 @@ depends = ["build"]
 env = { AUTOSTART = "1" }
 run = "./scripts/install.sh"
 
+[tasks."service:enable"]
+description = "Run in the background: start with your session, restart on failure"
+depends = ["install"]
+run = "./scripts/service.sh enable"
+
+[tasks."service:disable"]
+description = "Stop running in the background and remove the service"
+run = "./scripts/service.sh disable"
+
+[tasks."service:status"]
+description = "Is it running?"
+run = "./scripts/service.sh status"
+
+[tasks.logs]
+description = "Follow the app's logs"
+run = "./scripts/service.sh logs"
+
 [tasks.uninstall]
 description = "Remove everything install put in ~/.local"
 run = "./scripts/uninstall.sh"

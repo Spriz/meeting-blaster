@@ -113,6 +113,28 @@ This installs four files under your home directory and nothing else:
 ~/.config/autostart/meeting-blaster.desktop     (autostart only)
 ```
 
+### Running it in the background
+
+Rather than keeping a terminal open, run it as a systemd user service. It
+starts with your desktop session, restarts if it crashes, and logs to the
+journal:
+
+```sh
+mise run service:enable     # start now, and on every login
+mise run service:status     # is it running?
+mise run logs               # follow its output
+mise run service:disable    # stop and remove it
+```
+
+Enabling the service removes the autostart entry if you installed one, so the
+app is not launched twice. If it does get started twice anyway, the second
+copy exits with `meeting-blaster is already running` rather than putting a
+second icon in your tray.
+
+**This is Linux only.** systemd has no equivalent on macOS or Windows; those
+platforms would need a launchd agent and a Startup entry respectively, and
+neither is written yet. On those systems, launch the binary yourself.
+
 ## Setup
 
 meeting-blaster talks to Google directly, so it needs its own OAuth client.
@@ -192,6 +214,11 @@ under their `GOOS`, but have not been run — treat them as unfinished.
 On Windows the tray shows no text label (the OS has no such concept), so the
 countdown appears in the hover tooltip and the full-screen alert does the
 heavy lifting.
+
+Desktop integration is Linux-only too. The `.desktop` entry, the icon
+install, and the systemd service all assume freedesktop conventions. macOS
+would need an `.app` bundle and a launchd agent; Windows a shortcut and a
+Startup or Task Scheduler entry.
 
 ## Licence
 

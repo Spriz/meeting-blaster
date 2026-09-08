@@ -26,6 +26,7 @@ import (
 	"github.com/spriz/meeting-blaster/internal/overlay"
 	"github.com/spriz/meeting-blaster/internal/prefs"
 	"github.com/spriz/meeting-blaster/internal/screens"
+	"github.com/spriz/meeting-blaster/internal/singleton"
 	"github.com/spriz/meeting-blaster/internal/tokens"
 	"github.com/spriz/meeting-blaster/internal/tray"
 )
@@ -87,6 +88,19 @@ func run(log *slog.Logger, login, logout, testAlert bool) error {
 		fmt.Println("Signed out. Run meeting-blaster again to sign back in.")
 		return nil
 	}
+
+	// A second copy would mean two tray icons and two full-screen alerts,
+	// which is worse than none.
+	release, err := singleton.Acquire()
+	if err != nil {
+		var running singleton.ErrAlreadyRunning
+		if errors.As(err, &running) {
+			fmt.Println("meeting-blaster is already running.")
+			return nil
+		}
+		return err
+	}
+	defer release()
 
 	cfg, err := config.Load()
 	if err != nil {
