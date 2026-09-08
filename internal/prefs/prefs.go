@@ -52,7 +52,7 @@ func (w *Window) show(cfg config.Config) {
 	}
 
 	win := w.app.NewWindow("meeting-blaster preferences")
-	win.Resize(fyne.NewSize(520, 620))
+	win.Resize(fyne.NewSize(560, 760))
 
 	w.mu.Lock()
 	w.win = win
@@ -192,15 +192,29 @@ func (w *Window) show(cfg config.Config) {
 		widget.NewLabel("Unticking everything watches all calendars."),
 	)
 
+	// The settings and the calendar list scroll together as one column.
+	// Putting the list in the centre of a Border layout gave it only the
+	// space the form left over, which on a full calendar account was a
+	// couple of pixels.
+	// Padding keeps the entry fields clear of the scrollbar, which
+	// otherwise sits on top of their right edge.
+	scrolling := container.NewVScroll(
+		container.NewPadded(container.NewVBox(form, calendarBox)),
+	)
+
 	content := container.NewBorder(
-		form,
-		container.NewVBox(status, save),
+		nil,
+		container.NewVBox(widget.NewSeparator(), status, save),
 		nil, nil,
-		container.NewVScroll(calendarBox),
+		scrolling,
 	)
 
 	win.SetContent(content)
 	win.Show()
+
+	// Fyne scrolls to whichever widget takes focus first, which lands the
+	// window partway down the settings. Start at the top instead.
+	scrolling.ScrollToTop()
 }
 
 // loadCalendars fetches the calendar list off the UI thread, then swaps the
