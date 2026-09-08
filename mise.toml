@@ -43,5 +43,20 @@ description = "Sign in to Google again"
 depends = ["build"]
 run = "./bin/meeting-blaster --login"
 
+[tasks.install]
+description = "Build and install into ~/.local (binary, icon, launcher entry)"
+depends = ["build"]
+run = "./scripts/install.sh"
+
+[tasks."install:autostart"]
+description = "Install and start automatically on login"
+depends = ["build"]
+env = { AUTOSTART = "1" }
+run = "./scripts/install.sh"
+
+[tasks.uninstall]
+description = "Remove everything install put in ~/.local"
+run = "./scripts/uninstall.sh"
+
 [tasks.tidy]
 run = "go mod tidy"

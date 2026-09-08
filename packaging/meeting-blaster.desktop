@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=meeting-blaster
+GenericName=Meeting reminder
+Comment=Your next meeting in the tray, with a full-screen alert before it starts
+Exec=meeting-blaster
+Icon=meeting-blaster
+Terminal=false
+Categories=Office;Calendar;
+Keywords=meeting;calendar;zoom;meet;teams;reminder;
+StartupNotify=false
+X-GNOME-UsesNotifications=true

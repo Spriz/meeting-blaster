@@ -41,13 +41,62 @@ A minute before the meeting, the whole screen goes to this:
 
 ## Install
 
-Requires [mise](https://mise.jdx.dev) and, on Ubuntu, X11 headers:
+### With mise (no compiler needed)
 
 ```sh
-sudo apt install xorg-dev
-git clone https://github.com/spriz/meeting-blaster
+mise use -g ubi:Spriz/meeting-blaster
+```
+
+This pulls a prebuilt binary from the latest
+[release](https://github.com/Spriz/meeting-blaster/releases) and puts it on
+your PATH. Nothing to build, no X11 headers required.
+
+### From a release archive
+
+Download the latest `linux-amd64` tarball from
+[Releases](https://github.com/Spriz/meeting-blaster/releases), then:
+
+```sh
+tar -xzf meeting-blaster-*-linux-amd64.tar.gz
+cd meeting-blaster-*-linux-amd64
+install -m 0755 meeting-blaster ~/.local/bin/
+```
+
+Checksums are published alongside each release as `checksums.txt`.
+
+### From source
+
+Building needs a Go toolchain (managed by [mise](https://mise.jdx.dev)) and
+the X11 development headers, because Fyne renders through GLFW:
+
+```sh
+sudo apt install xorg-dev          # Debian/Ubuntu
+git clone https://github.com/Spriz/meeting-blaster
 cd meeting-blaster
-mise run build
+mise run build                     # -> ./bin/meeting-blaster
+```
+
+Fedora: `sudo dnf install libX11-devel libXcursor-devel libXrandr-devel
+libXinerama-devel libXi-devel mesa-libGL-devel`.
+Arch: `sudo pacman -S libx11 libxcursor libxrandr libxinerama libxi mesa`.
+
+### Desktop integration
+
+To get an applications-menu entry and icon rather than a bare binary:
+
+```sh
+mise run install              # -> ~/.local, no root needed
+mise run install:autostart    # the same, plus start on login
+mise run uninstall            # removes all of it again
+```
+
+This installs four files under your home directory and nothing else:
+
+```
+~/.local/bin/meeting-blaster
+~/.local/share/applications/meeting-blaster.desktop
+~/.local/share/icons/hicolor/64x64/apps/meeting-blaster.png
+~/.config/autostart/meeting-blaster.desktop     (autostart only)
 ```
 
 ## Setup

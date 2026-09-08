@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Fyne renders through GLFW, which needs the X11 development headers.
+      # This is also why there is no cross-compiled build here: CGO would
+      # need a full X11 sysroot for every target.
+      - name: Install X11 headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorg-dev
+
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
+
+      - name: Resolve version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME:-${{ inputs.tag }}}" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          GOFLAGS: "-tags=x11"
+        run: |
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${{ steps.version.outputs.value }}" \
+            -o dist/meeting-blaster ./cmd/meeting-blaster
+
+      - name: Package
+        working-directory: dist
+        run: |
+          name="meeting-blaster-${{ steps.version.outputs.value }}-linux-amd64"
+          mkdir -p "$name"
+          cp meeting-blaster "$name/"
+          cp ../LICENSE ../README.md "$name/"
+          cp -r ../packaging "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > checksums.txt
+          ls -la
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.value }}" \
+            dist/*.tar.gz dist/checksums.txt \
+            --title "${{ steps.version.outputs.value }}" \
+            --generate-notes \
+            --verify-tag || \
+          gh release upload "${{ steps.version.outputs.value }}" \
+            dist/*.tar.gz dist/checksums.txt --clobber

@@ -26,6 +26,8 @@ mise run build     # -> ./bin/meeting-blaster
 mise run test      # go test ./...
 mise run lint      # go vet + gofmt check
 mise run alert     # preview the full-screen alert, no meeting required
+mise run install   # install into ~/.local for real-world testing
+mise run uninstall # and remove it again
 ```
 
 A single package or a single test:
