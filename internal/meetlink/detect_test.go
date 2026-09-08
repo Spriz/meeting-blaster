@@ -17,8 +17,8 @@ func TestDetect(t *testing.T) {
 		},
 		{
 			name:    "zoom with query string",
-			fields:  []string{"", "Join: https://apacta.zoom.us/j/98765432101?pwd=Abc123 see you"},
-			wantURL: "https://apacta.zoom.us/j/98765432101?pwd=Abc123",
+			fields:  []string{"", "Join: https://acme.zoom.us/j/98765432101?pwd=Abc123 see you"},
+			wantURL: "https://acme.zoom.us/j/98765432101?pwd=Abc123",
 			wantSvc: "Zoom",
 		},
 		{
@@ -35,7 +35,7 @@ func TestDetect(t *testing.T) {
 		},
 		{
 			name:   "location wins over description",
-			fields: []string{"https://meet.google.com/aaa-bbbb-ccc", "https://apacta.zoom.us/j/111"},
+			fields: []string{"https://meet.google.com/aaa-bbbb-ccc", "https://acme.zoom.us/j/111"},
 
 			wantURL: "https://meet.google.com/aaa-bbbb-ccc",
 			wantSvc: "Google Meet",
