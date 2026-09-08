@@ -252,6 +252,12 @@ install, and the systemd service all assume freedesktop conventions. macOS
 would need an `.app` bundle and a launchd agent; Windows a shortcut and a
 Startup or Task Scheduler entry.
 
+## Contributing
+
+Read [CONVENTIONS.md](CONVENTIONS.md) before making changes. It covers the
+development workflow, red/green TDD and 100% coverage goal, and architectural
+rules to preserve.
+
 ## Licence
 
 MIT
