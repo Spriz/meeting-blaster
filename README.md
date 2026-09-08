@@ -34,6 +34,8 @@ A minute before the meeting, the whole screen goes to this:
 
 - Next meeting and a live countdown in the tray
 - Today's remaining agenda in the menu, click any entry to join
+- Shared events shown and alerted once across watched Google calendars
+  and ICS subscriptions, without merging separate recurring occurrences
 - Full-screen alert you cannot miss, with one-click join — on the primary
   display, on every display at once, or wherever focus happens to be
 - Desktop notification at a separate, earlier lead time

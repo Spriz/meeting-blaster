@@ -152,9 +152,10 @@ func (t *Tray) Update(state engine.State, cfg config.Config, now time.Time) {
 	label := Label(state, cfg, now)
 	setLabel(label, Tooltip(state, cfg, now))
 
+	key := agendaKey(state)
 	t.mu.Lock()
-	changed := t.lastSet != agendaKey(state)
-	t.lastSet = agendaKey(state)
+	changed := t.lastSet != key
+	t.lastSet = key
 	t.mu.Unlock()
 
 	// The status line carries the countdown, so it updates every tick.
@@ -220,10 +221,13 @@ func (t *Tray) rebuildAgenda(state engine.State, cfg config.Config, now time.Tim
 }
 
 // agendaKey summarises the agenda so Update can skip rebuilding when only
-// the countdown moved.
+// the countdown moved. Include the calendar because shared copies can have
+// the same event ID but different join links.
 func agendaKey(state engine.State) string {
 	key := make([]byte, 0, 64)
 	for _, ev := range state.Events {
+		key = append(key, ev.CalendarID...)
+		key = append(key, byte('|'))
 		key = append(key, ev.ID...)
 		key = append(key, byte('|'))
 	}

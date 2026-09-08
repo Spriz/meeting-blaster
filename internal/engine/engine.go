@@ -67,10 +67,37 @@ type Engine struct {
 	refresh chan struct{}
 }
 
+type occurrenceIdentity struct {
+	uid          string
+	recurrenceID time.Time
+	calendarID   string
+	eventID      string
+}
+
 type key struct {
-	eventID string
-	start   time.Time
-	kind    string
+	identity occurrenceIdentity
+	start    time.Time
+	kind     string
+}
+
+func occurrenceOf(ev calendar.Event) occurrenceIdentity {
+	if ev.UID != "" {
+		return occurrenceIdentity{uid: ev.UID, recurrenceID: ev.RecurrenceID.UTC()}
+	}
+	return occurrenceIdentity{calendarID: ev.CalendarID, eventID: ev.ID}
+}
+
+func preferEvent(candidate, current calendar.Event) bool {
+	if candidate.Declined != current.Declined {
+		return !candidate.Declined
+	}
+	if candidate.HasLink() != current.HasLink() {
+		return candidate.HasLink()
+	}
+	if candidate.CalendarID != current.CalendarID {
+		return candidate.CalendarID < current.CalendarID
+	}
+	return candidate.ID < current.ID
 }
 
 // New builds an Engine. cfg may be replaced later with SetConfig.
@@ -196,14 +223,14 @@ func (e *Engine) tick() {
 	var alerts, notifies []calendar.Event
 	for _, ev := range events {
 		if Due(ev, now, cfg.AlertLead.Std()) {
-			k := key{ev.ID, ev.Start, "alert"}
+			k := key{identity: occurrenceOf(ev), start: ev.Start.UTC(), kind: "alert"}
 			if !e.fired[k] {
 				e.fired[k] = true
 				alerts = append(alerts, ev)
 			}
 		}
 		if cfg.NotifyLead.Std() > 0 && Due(ev, now, cfg.NotifyLead.Std()) {
-			k := key{ev.ID, ev.Start, "notify"}
+			k := key{identity: occurrenceOf(ev), start: ev.Start.UTC(), kind: "notify"}
 			if !e.fired[k] {
 				e.fired[k] = true
 				notifies = append(notifies, ev)
@@ -244,22 +271,33 @@ func (e *Engine) pruneFired(now time.Time) {
 	}
 }
 
-// Filter applies the user's calendar selection and declined-event
-// preference, and drops all-day events, which are never "the next meeting".
+// Filter applies selection and declined-event preferences, drops all-day
+// events, then deduplicates reliable shared occurrences.
 func Filter(events []calendar.Event, cfg config.Config) []calendar.Event {
 	out := make([]calendar.Event, 0, len(events))
+	var representatives map[occurrenceIdentity]int
 	for _, ev := range events {
-		if ev.AllDay {
+		if ev.AllDay || !cfg.Watches(ev.CalendarID) || (cfg.HideDeclined && ev.Declined) {
 			continue
 		}
-		if !cfg.Watches(ev.CalendarID) {
+		if ev.UID == "" {
+			out = append(out, ev)
 			continue
 		}
-		if cfg.HideDeclined && ev.Declined {
+		if representatives == nil {
+			representatives = make(map[occurrenceIdentity]int, len(events))
+		}
+		identity := occurrenceOf(ev)
+		if index, ok := representatives[identity]; ok {
+			if preferEvent(ev, out[index]) {
+				out[index] = ev
+			}
 			continue
 		}
+		representatives[identity] = len(out)
 		out = append(out, ev)
 	}
+	calendar.SortByStart(out)
 	return out
 }
 

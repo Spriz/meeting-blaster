@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -102,6 +103,132 @@ func TestFilter(t *testing.T) {
 			t.Fatalf("got %v, want 3 non-all-day events", ids(got))
 		}
 	})
+}
+
+func TestFilterDeduplicatesSharedOccurrences(t *testing.T) {
+	cfg := config.Default()
+	cfg.HideDeclined = false
+	loc := time.FixedZone("UTC+2", 2*60*60)
+	rid := time.Date(2026, 9, 8, 10, 0, 0, 0, loc)
+	events := []calendar.Event{
+		{ID: "declined", CalendarID: "acal", UID: "shared", RecurrenceID: rid, Start: base.Add(2 * time.Hour), End: base.Add(3 * time.Hour), Declined: true, MeetingURL: "https://meet.example/shared"},
+		{ID: "accepted-no-link", CalendarID: "bcal", UID: "shared", RecurrenceID: rid.UTC(), Start: base.Add(90 * time.Minute), End: base.Add(150 * time.Minute)},
+		{ID: "accepted-link", CalendarID: "zcal", UID: "shared", RecurrenceID: rid, Start: base.Add(90 * time.Minute), End: base.Add(150 * time.Minute), MeetingURL: "https://meet.example/shared"},
+		{ID: "other", CalendarID: "other", UID: "other-uid", Title: "shared", Start: base.Add(90 * time.Minute), End: base.Add(2*time.Hour + 30*time.Minute)},
+		{ID: "same", CalendarID: "zcal", UID: "stable", Start: base.Add(4 * time.Hour), End: base.Add(5 * time.Hour)},
+		{ID: "first", CalendarID: "acal", UID: "stable", Start: base.Add(4 * time.Hour), End: base.Add(5 * time.Hour)},
+		{ID: "unknown-1", CalendarID: "one", Start: base.Add(6 * time.Hour), End: base.Add(7 * time.Hour)},
+		{ID: "unknown-2", CalendarID: "two", Start: base.Add(6 * time.Hour), End: base.Add(7 * time.Hour)},
+	}
+
+	got := Filter(events, cfg)
+	gotIDs := ids(got)
+	if len(got) != 5 || gotIDs[0] != "accepted-link" || gotIDs[1] != "other" || gotIDs[2] != "first" || gotIDs[3] != "unknown-1" || gotIDs[4] != "unknown-2" {
+		t.Fatalf("got %v, want shared representative and all distinct unknown events", gotIDs)
+	}
+	if got[0].MeetingURL != "https://meet.example/shared" || got[0].Declined || got[0].ID != "accepted-link" {
+		t.Fatalf("shared representative = %+v, want nondeclined copy with link", got[0])
+	}
+}
+
+func TestFilterDeduplicatesAfterSelection(t *testing.T) {
+	cfg := config.Default()
+	cfg.CalendarIDs = []string{"selected"}
+	events := []calendar.Event{
+		{ID: "ignored", CalendarID: "ignored", UID: "shared", Start: base, End: base.Add(time.Hour), MeetingURL: "https://meet.example/ignored"},
+		{ID: "all-day", CalendarID: "selected", UID: "shared", AllDay: true},
+		{ID: "declined", CalendarID: "selected", UID: "shared", Declined: true, Start: base, End: base.Add(time.Hour)},
+		{ID: "selected", CalendarID: "selected", UID: "shared", Start: base.Add(time.Hour), End: base.Add(2 * time.Hour)},
+	}
+	got := Filter(events, cfg)
+	if len(got) != 1 || got[0].ID != "selected" {
+		t.Fatalf("got %v, want selected copy only", ids(got))
+	}
+}
+
+type sequenceProvider struct {
+	events [][]calendar.Event
+	calls  int
+}
+
+func (p *sequenceProvider) Name() string                                           { return "test" }
+func (p *sequenceProvider) Calendars(context.Context) ([]calendar.Calendar, error) { return nil, nil }
+func (p *sequenceProvider) Events(context.Context, time.Time, time.Time) ([]calendar.Event, error) {
+	index := p.calls
+	if index >= len(p.events) {
+		index = len(p.events) - 1
+	}
+	p.calls++
+	return p.events[index], nil
+}
+
+func TestSharedCopyAlertsOnceAcrossPolls(t *testing.T) {
+	cfg := config.Default()
+	cfg.AlertLead = config.Duration(5 * time.Minute)
+	cfg.NotifyLead = config.Duration(5 * time.Minute)
+	start := base.Add(5 * time.Minute)
+	copyA := calendar.Event{ID: "source-a", CalendarID: "calendar-a", UID: "shared", Start: start, End: start.Add(time.Hour)}
+	copyB := copyA
+	copyB.ID = "source-b"
+	copyB.CalendarID = "calendar-b"
+	copyB.MeetingURL = "https://meet.example/shared"
+
+	var alerts, notifies []calendar.Event
+	e := New(&sequenceProvider{events: [][]calendar.Event{{copyA}, {copyB}}}, cfg, Callbacks{
+		OnAlert:  func(ev calendar.Event) { alerts = append(alerts, ev) },
+		OnNotify: func(ev calendar.Event) { notifies = append(notifies, ev) },
+	}, nil)
+	e.now = func() time.Time { return base }
+	e.poll(context.Background())
+	e.poll(context.Background())
+
+	if len(alerts) != 1 || alerts[0].ID != copyA.ID || len(notifies) != 1 || notifies[0].ID != copyA.ID {
+		t.Fatalf("alerts = %v, notifies = %v, want one of each for the first available copy", alerts, notifies)
+	}
+}
+
+func TestSharedOccurrenceRescheduleAlertsAgain(t *testing.T) {
+	cfg := config.Default()
+	cfg.AlertLead = config.Duration(10 * time.Minute)
+	cfg.NotifyLead = 0
+	first := calendar.Event{ID: "first", CalendarID: "calendar", UID: "shared", Start: base.Add(5 * time.Minute), End: base.Add(time.Hour)}
+	rescheduled := first
+	rescheduled.ID = "replacement"
+	rescheduled.Start = base.Add(6 * time.Minute)
+	rescheduled.End = base.Add(2 * time.Hour)
+
+	var alerts []calendar.Event
+	e := New(&sequenceProvider{events: [][]calendar.Event{{first}, {rescheduled}}}, cfg, Callbacks{
+		OnAlert: func(ev calendar.Event) { alerts = append(alerts, ev) },
+	}, nil)
+	e.now = func() time.Time { return base }
+	e.poll(context.Background())
+	e.poll(context.Background())
+
+	if len(alerts) != 2 || alerts[0].ID != first.ID || alerts[1].ID != rescheduled.ID {
+		t.Fatalf("alerts = %v, want one alert per start time", alerts)
+	}
+}
+
+func TestFallbackAlertIdentityIncludesCalendar(t *testing.T) {
+	cfg := config.Default()
+	cfg.AlertLead = config.Duration(5 * time.Minute)
+	cfg.NotifyLead = 0
+	first := calendar.Event{ID: "same-id", CalendarID: "calendar-a", Start: base.Add(5 * time.Minute), End: base.Add(time.Hour)}
+	second := first
+	second.CalendarID = "calendar-b"
+
+	var alerts []calendar.Event
+	e := New(nil, cfg, Callbacks{
+		OnAlert: func(ev calendar.Event) { alerts = append(alerts, ev) },
+	}, nil)
+	e.state.Events = []calendar.Event{first, second}
+	e.now = func() time.Time { return base }
+	e.tick()
+
+	if len(alerts) != 2 {
+		t.Fatalf("alerts = %v, want both independent fallback events", alerts)
+	}
 }
 
 func TestAlertFiresExactlyOnce(t *testing.T) {

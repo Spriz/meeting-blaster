@@ -39,8 +39,13 @@ func (p *Provider) instances(cal *ical.Calendar, src Source, from, to time.Time)
 		}
 		dur := duration(ev, start, isAllDay)
 
+		isRecurring := ev.HasProperty(ical.ComponentPropertyRrule) || ev.HasProperty(ical.ComponentPropertyRdate)
 		for _, occ := range p.occurrences(ev, uid, start, dur, from, to) {
 			inst, instStart, instDur, instAllDay := ev, occ, dur, isAllDay
+			recurrenceID := time.Time{}
+			if isRecurring {
+				recurrenceID = occ
+			}
 
 			if ov := overrides.take(uid, occ); ov != nil {
 				ovAllDay := allDay(ov)
@@ -51,11 +56,12 @@ func (p *Provider) instances(cal *ical.Calendar, src Source, from, to time.Time)
 				}
 				inst, instStart, instAllDay = ov, ovStart, ovAllDay
 				instDur = duration(ov, ovStart, ovAllDay)
+				recurrenceID = occ
 			}
 
 			// event() drops a CANCELLED instance, which is how a
 			// RECURRENCE-ID override cancels a single occurrence.
-			if e, ok := event(inst, src, instStart, instDur, instAllDay); ok {
+			if e, ok := event(inst, src, instStart, instDur, instAllDay, recurrenceID); ok {
 				out = append(out, e)
 			}
 		}
@@ -77,7 +83,7 @@ func (p *Provider) instances(cal *ical.Calendar, src Source, from, to time.Time)
 				p.log.Warn("skipping calendar override with unreadable start", "uid", uid, "error", err)
 				continue
 			}
-			if e, ok := event(ov, src, start, duration(ov, start, isAllDay), isAllDay); ok {
+			if e, ok := event(ov, src, start, duration(ov, start, isAllDay), isAllDay, time.Unix(rid, 0)); ok {
 				out = append(out, e)
 			}
 		}

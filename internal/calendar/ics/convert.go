@@ -21,8 +21,9 @@ const (
 )
 
 // event maps one VEVENT onto the domain model at the given instance start.
-// Returns false for events that cannot be shown.
-func event(ev *ical.VEvent, src Source, start time.Time, dur time.Duration, isAllDay bool) (calendar.Event, bool) {
+// recurrenceID is the original start for a recurring instance; zero denotes
+// a single event. Returns false for events that cannot be shown.
+func event(ev *ical.VEvent, src Source, start time.Time, dur time.Duration, isAllDay bool, recurrenceID time.Time) (calendar.Event, bool) {
 	if strings.EqualFold(text(ev, ical.ComponentPropertyStatus), string(ical.ObjectStatusCancelled)) {
 		return calendar.Event{}, false
 	}
@@ -37,18 +38,19 @@ func event(ev *ical.VEvent, src Source, start time.Time, dur time.Duration, isAl
 	notes := text(ev, ical.ComponentPropertyDescription)
 
 	return calendar.Event{
-		// One ID per expanded instance, so the engine's fired-alert
-		// bookkeeping treats each occurrence of a series separately.
-		ID:         uid + "/" + start.UTC().Format("20060102T150405Z"),
-		CalendarID: src.ID,
-		Title:      title,
-		Start:      start,
-		End:        start.Add(dur),
-		AllDay:     isAllDay,
-		Location:   location,
-		Notes:      notes,
-		MeetingURL: joinURL(ev),
-		Declined:   declined(ev, src.Email),
+		// Keep the feed-local ID separate from shared UID/RecurrenceID identity.
+		ID:           uid + "/" + start.UTC().Format("20060102T150405Z"),
+		CalendarID:   src.ID,
+		Title:        title,
+		Start:        start,
+		End:          start.Add(dur),
+		AllDay:       isAllDay,
+		Location:     location,
+		Notes:        notes,
+		UID:          uid,
+		RecurrenceID: recurrenceID.UTC(),
+		MeetingURL:   joinURL(ev),
+		Declined:     declined(ev, src.Email),
 	}, true
 }
 

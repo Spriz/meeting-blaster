@@ -1,8 +1,7 @@
 // Package calendar defines the provider-agnostic calendar model.
 //
-// Nothing in this package may import a concrete provider. Google lives in
-// ./google; Microsoft and CalDAV are expected to land beside it without
-// changing anything here.
+// Nothing in this package may import a concrete provider. Google and ICS
+// live in sibling packages; new providers implement the same model.
 package calendar
 
 import (
@@ -20,6 +19,15 @@ type Event struct {
 	AllDay     bool
 	Location   string
 	Notes      string
+
+	// UID is the RFC 5545 UID shared by copies across calendars and
+	// providers. Empty means no reliable cross-calendar identity is known.
+	UID string
+
+	// RecurrenceID is the original start of an expanded recurring instance,
+	// even when it was rescheduled. Zero for non-recurring events. Providers
+	// must leave UID empty if a recurring instance cannot be identified.
+	RecurrenceID time.Time
 
 	// MeetingURL is the join link, when one was found. Providers set this
 	// from structured conference data where available, falling back to

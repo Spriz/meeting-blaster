@@ -154,17 +154,42 @@ func convert(item *calendarapi.Event, calendarID string) (calendar.Event, bool) 
 		title = "(no title)"
 	}
 
+	// Google returns ICalUID for the RFC 5545 identity shared by copies of
+	// an event across calendars. Expanded recurring instances additionally
+	// carry the original occurrence start; keep that start separate from
+	// Start because an override may have moved the instance.
+	uid := item.ICalUID
+	var recurrenceID time.Time
+	if item.RecurringEventId != "" {
+		if item.OriginalStartTime != nil {
+			recurrenceID, _, err = parseTime(item.OriginalStartTime)
+			if err != nil {
+				// A usable event is still useful even when Google omitted or
+				// corrupted the occurrence identity. It simply cannot be
+				// safely deduplicated with copies from another calendar.
+				recurrenceID = time.Time{}
+				uid = ""
+			} else {
+				recurrenceID = recurrenceID.UTC()
+			}
+		} else {
+			uid = ""
+		}
+	}
+
 	ev := calendar.Event{
-		ID:         item.Id,
-		CalendarID: calendarID,
-		Title:      title,
-		Start:      start,
-		End:        end,
-		AllDay:     allDay,
-		Location:   item.Location,
-		Notes:      item.Description,
-		MeetingURL: joinURL(item),
-		Declined:   declined(item),
+		ID:           item.Id,
+		CalendarID:   calendarID,
+		Title:        title,
+		Start:        start,
+		End:          end,
+		AllDay:       allDay,
+		Location:     item.Location,
+		Notes:        item.Description,
+		UID:          uid,
+		RecurrenceID: recurrenceID,
+		MeetingURL:   joinURL(item),
+		Declined:     declined(item),
 	}
 	return ev, true
 }
