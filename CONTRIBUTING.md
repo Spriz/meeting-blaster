@@ -5,13 +5,16 @@ light.
 
 ## Getting set up
 
-You need [mise](https://mise.jdx.dev), which pins the Go toolchain, plus X11
-development headers for the GUI:
+You need [mise](https://mise.jdx.dev), which pins Go and the
+[hk](https://hk.jdx.dev) Git hook manager, plus X11 development headers for the GUI:
 
 ```sh
 sudo apt install xorg-dev          # Debian/Ubuntu
 git clone https://github.com/Spriz/meeting-blaster
 cd meeting-blaster
+mise trust
+mise install
+mise run hooks:install
 mise run build
 ```
 
@@ -39,6 +42,19 @@ mise exec -- go test ./internal/engine/ -run TestAlertFiresExactlyOnce -v
 
 `mise run lint` and `mise run test` are what CI runs. Get both green before
 opening a pull request.
+
+Install the hooks once per clone with `mise run hooks:install` (included in the
+setup above). Before each commit, the hook formats staged Go files with `gofmt`
+and automatically stages the formatting changes. Unstaged changes are temporarily
+set aside and restored afterward, so partially staged files keep their unstaged
+edits out of the commit.
+
+After formatting, the hook runs `mise run lint` across the repository:
+`go vet ./...` plus a `gofmt` check. Formatting is fixed automatically; remaining
+errors, such as `go vet` findings, still block the commit.
+
+The hook activates the pinned tools through mise, so shell activation is not
+required; `mise` itself must be on Git's `PATH`.
 
 ## Things worth knowing before you change code
 
@@ -68,15 +84,27 @@ Three rules that are easy to break by accident:
 - Say what you actually verified. "Builds and tests pass" and "I ran it and
   watched the overlay fire" are different claims, and the second is worth more.
 
-## Adding a calendar provider
+## Calendar subscriptions
 
-Google is the only provider today, but the seam is deliberate. Implement
-`calendar.Provider` in a sibling package of `internal/calendar/google` and wire
-it up in `main`. Nothing under `internal/calendar` may import a concrete
-provider.
+The supported calendar input is an iCalendar subscription over `webcal://`,
+`http://`, or `https://`, or a local `.ics` file. Google Calendar is supported
+through its private "Secret address in iCal format" feed; contributors do not
+need a Google API project or account sign-in to run the app. For a local smoke
+run, add a fixture with:
 
-Prefer structured conference data from the API over scraping text; fall back to
-`meetlink.Detect` only when the provider offers nothing better.
+```sh
+meeting-blaster --add-calendar ./path/to/calendar.ics
+```
+
+The `multi` provider wrapper is intentionally retained for multiple
+subscriptions and future providers. Keep `calendar.Provider` provider-neutral;
+new providers belong in sibling packages and are wired into `multi.Source` from
+`main`.
+
+Prefer structured conference properties in the feed, including `CONFERENCE`
+and `X-GOOGLE-CONFERENCE`, over text scraping. Fall back to `meetlink.Detect`
+when no structured link is available. Existing subscription IDs remain
+namespaced as `ics:`.
 
 ## Platform support
 
@@ -88,8 +116,11 @@ that gap is the project's biggest unknown.
 ## Reporting bugs
 
 Include your OS and desktop environment, whether you are on X11 or Wayland,
-your calendar provider, and what `meeting-blaster -v` prints. For anything
-involving the overlay, a screenshot or a description of what the screen did is
-worth a lot.
+the subscription type (webcal/http(s)/local ICS), its configured display name,
+and what `meeting-blaster -v` prints. For anything involving the overlay, a
+screenshot or a description of what the screen did is worth a lot.
 
-Never paste the contents of `credentials.json` or an OAuth token into an issue.
+Never paste a private subscription URL, config containing one, or calendar
+contents into an issue. Redact feed paths and query strings from copied output;
+subscription lists and CLI confirmations should identify feeds by name rather
+than their full URLs.

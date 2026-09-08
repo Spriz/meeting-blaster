@@ -339,8 +339,8 @@
   <section>
     <h2>The details</h2>
     <ul class="plain">
-      <li><b>Calendar</b><span>Google Calendar, through your own OAuth client. Read-only — it never writes to your calendar.</span></li>
-      <li><b>Where tokens live</b><span>Your system keyring: Secret Service, Keychain, or Credential Manager. Never in a file, never in a log.</span></li>
+      <li><b>Calendar</b><span>iCalendar subscriptions via <code>webcal://</code>, <code>http://</code>, <code>https://</code>, or local <code>.ics</code> files. Google-hosted private iCal feeds remain supported, including <code>X-GOOGLE-CONFERENCE</code> and Meet links.</span></li>
+      <li><b>Feed privacy</b><span>Private remote feed URLs are bearer credentials. They are saved in your config because the app needs them to fetch events, but subscription lists and CLI confirmations show the configured name or a safe generic fallback, never the full URL.</span></li>
       <li><b>Join links</b><span>Meet, Zoom, Teams, Webex, Whereby, Jitsi, GoTo, BlueJeans, Chime, Around, Discord and Slack huddles.</span></li>
       <li><b>Lead times</b><span>Full-screen alert and desktop notification fire independently, so you can get a nudge at five minutes and the takeover at one.</span></li>
       <li><b>Desktop</b><span>Built and tested on Ubuntu 24.04, GNOME 46, X11 and XWayland. <code>mise run install</code> adds a menu entry and icon under your home directory, no root.</span></li>
@@ -350,13 +350,12 @@
 
   <section>
     <h2>Setting it up</h2>
-    <p class="sub">meeting-blaster talks to Google directly, so it needs an OAuth client of its own. This is once, and everything stays on your machine.</p>
+    <p class="sub">Manage iCalendar subscriptions from <b>Preferences…</b> in the tray menu — no Google API project or account sign-in is required. The command line is only the one-time bootstrap when no subscription exists yet.</p>
     <ol class="steps">
-      <li><b>Create a Google Cloud project.</b> Any name will do.</li>
-      <li><b>Enable the Google Calendar API</b> for that project.</li>
-      <li><b>Configure the consent screen</b> as External, and add yourself as a test user.</li>
-      <li><b>Create an OAuth client ID</b> of type Desktop app.</li>
-      <li><b>Save the downloaded JSON</b> to <code>~/.config/meeting-blaster/credentials.json</code>, then start the app. It opens your browser to sign in.</li>
+      <li><b>Find an iCalendar subscription.</b> Google Calendar calls its private feed the “Secret address in iCal format”; Outlook/M365 and Nextcloud provide subscription links too.</li>
+      <li><b>Manage subscriptions in Preferences…</b> Open the tray menu, choose <b>Preferences…</b>, and add or remove feeds there. It accepts <code>webcal://</code>, <code>http://</code>, <code>https://</code>, and local <code>.ics</code> files.</li>
+      <li><b>Bootstrap a first subscription when needed.</b> With no subscriptions there is no tray menu yet: the app prints setup guidance and exits. Add the first feed with <code>meeting-blaster --add-calendar "webcal://example.com/your-calendar.ics"</code>, then use <b>Preferences…</b> for everything after that.</li>
+      <li><b>Keep the URL private.</b> Anyone who has a private feed URL may be able to read the calendar. The app uses the configured feed name, or a safe generic fallback, in subscription lists and CLI confirmations instead of showing the full URL.</li>
     </ol>
     <a class="cta" href="https://github.com/Spriz/meeting-blaster#setup">Full setup instructions</a>
   </section>

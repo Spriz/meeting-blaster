@@ -5,8 +5,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please never paste the contents of `credentials.json` or an OAuth
-        token into an issue.
+        Please never paste a private iCalendar subscription URL, a config file
+        containing one, or calendar contents into an issue. Redact feed paths
+        and query strings from logs; subscription lists identify feeds by name,
+        not their full URLs.
 
   - type: textarea
     id: what-happened
@@ -28,6 +30,15 @@ body:
     attributes:
       label: OS and desktop environment
       placeholder: Ubuntu 24.04, GNOME 46
+    validations:
+      required: true
+
+  - type: input
+    id: subscription
+    attributes:
+      label: Calendar subscription
+      description: Type (webcal/http(s)/local ICS) and configured display name; do not include the feed URL.
+      placeholder: webcal, Team calendar
     validations:
       required: true
 

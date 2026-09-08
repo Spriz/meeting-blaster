@@ -21,7 +21,6 @@ mise run build      # -> ./bin/meeting-blaster
 mise run test       # go test ./...
 mise run lint       # go vet + gofmt check
 mise run alert      # show a sample overlay without waiting for a meeting
-mise run login      # re-run the Google OAuth flow
 ```
 
 Single package or test:
@@ -81,8 +80,7 @@ Data flows one way: provider -> engine -> callbacks -> UI.
 cmd/meeting-blaster    wiring, flags, thread ownership
 internal/
   calendar/            Event, Provider - no provider-specific code
-    google/            Google Calendar + OAuth
-    ics/               iCalendar subscriptions (webcal / https / .ics files)
+    ics/               iCalendar subscriptions (webcal / http(s) / .ics files)
     multi/             fans Provider out over several sources at once
   engine/              poll loop, "what is next", when to alert
   overlay/             the full-screen alert
@@ -90,9 +88,46 @@ internal/
   tray/                tray label + menu
   prefs/               settings window
   meetlink/            find join links in event text
-  config/  tokens/     settings on disk, tokens in the OS keyring
+  config/              settings and subscription URLs on disk
   notify/  browser/    per-OS shims
 ```
+
+### Calendar subscriptions and providers
+
+The current input is iCalendar subscriptions over `webcal://`, `http://`, or
+`https://`, plus local `.ics` files. Google Calendar remains compatible as a
+source of its private iCal feed; no Google API project or account sign-in is
+part of this path.
+
+Keep `calendar.Provider` provider-neutral. The `multi` wrapper fans out over
+several sources and is retained even while ICS is the only concrete provider.
+If another provider is added later, implement `calendar.Provider` in a sibling
+package and add it to the `multi.Source` list in `main`.
+
+`Event.MeetingURL` should use structured conference properties in the feed,
+including `CONFERENCE` and `X-GOOGLE-CONFERENCE`, falling back to
+`meetlink.Detect` on location and description.
+
+Calendar IDs are namespaced by source (`ics:` for existing subscriptions) in
+`internal/calendar/multi`. Preserve those IDs and watch selections; do not
+derive a new user-facing identifier from a private feed URL.
+
+Both `multi` and `ics` treat partial failure as success: `engine.poll`
+discards the whole event set when the provider errors, so one dead feed must
+not blank out a working source. Only when every source fails do they return an
+error. Preserve that.
+
+## Subscription data
+
+Remote subscription URLs are bearer credentials: the path or query may be the
+only thing protecting a private calendar. Keep them out of commits, screenshots,
+issues, and logs. The URL is necessarily stored in `config.json` and supplied
+when the subscription is added, but subscription lists and CLI confirmations
+use the configured feed name, with a safe generic fallback, rather than showing
+the full URL. Fetch errors and logs should likewise avoid the URL path and query.
+
+When no subscriptions are configured, startup prints only subscription setup
+guidance and exits nonzero. No account sign-in is involved.
 
 ### Threading, which is the easiest thing to get wrong here
 
@@ -118,24 +153,6 @@ flag and `Update` returns early before that. A local `.ics` feed polls in
 microseconds, so the first `Update` really does arrive before the menu
 exists; dereferencing it crashed the app before it showed an icon.
 
-### Adding a calendar provider
-
-Implement `calendar.Provider` in a sibling of `internal/calendar/google` and
-add it to the `multi.Source` list in `main`. Nothing in `internal/calendar`
-may import a concrete provider. `Event.MeetingURL` should come from
-structured conference data where the API offers it, falling back to
-`meetlink.Detect` on location and description.
-
-Calendar IDs are namespaced by source (`google:`, `ics:`) in
-`internal/calendar/multi`, so a new provider needs its own key beside
-`config.SourceGoogle` / `config.SourceICS`, and `config.migrateCalendarIDs`
-is what keeps an existing watch selection matching after the prefixes
-changed.
-
-Both `multi` and `ics` treat partial failure as success: `engine.poll`
-discards the whole event set when the provider errors, so one dead feed or a
-Google token needing re-auth must not blank out a working source. Only when
-every source fails do they return an error. Preserve that.
 
 ### Alerting rules worth preserving
 
@@ -206,10 +223,3 @@ therefore sizes its type as a fraction of measured screen height
 (`internal/overlay/scale.go`) rather than in fixed pixels, and scales the
 widget theme to match. Hard-coded `TextSize` values in the overlay will render
 too small on a 4K display to serve their purpose.
-
-## Credentials
-
-`credentials.json` (the Google OAuth client) lives in the XDG config dir and
-is gitignored. OAuth tokens go to the OS keyring via `internal/tokens`, never
-to disk. Running with no credentials prints setup instructions and exits 1 -
-that path returns `errSetupPrinted` so `main` does not log a duplicate error.
