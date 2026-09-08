@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meeting-blaster — the meeting alert you can't miss, for Linux</title>
+<meta name="description" content="Your next meeting in the Linux system tray, and a full-screen alert before it starts. A MeetingBar-inspired app for GNOME and X11.">
+<meta property="og:title" content="meeting-blaster">
+<meta property="og:description" content="Your next meeting in the tray, and a full-screen alert you can't miss. For Linux.">
+<meta property="og:image" content="https://spriz.github.io/meeting-blaster/overlay.png">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📅</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Martian+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Taken from the application itself, not chosen for the page. */
+    --ink:#0d0d12;
+    --urgent:#ff5369;
+    --on-dark:#f5f5fa;
+    --dim:#9a9ab0;
+
+    --paper:#f3f4f8;
+    --panel:#ffffff;
+    --rule:#dcdee8;
+    --body:#1a1b23;
+    --muted:#5f6376;
+
+    --measure:38rem;
+    --sans:'Archivo',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --mono:'Martian Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--body);
+    font:400 17px/1.6 var(--sans);
+    font-synthesis-weight:none;
+  }
+  h1,h2,h3{font-weight:700;line-height:1.1;letter-spacing:-.02em;margin:0}
+  p{margin:0}
+  a{color:inherit}
+
+  .wrap{width:min(100% - 3rem, 72rem);margin-inline:auto}
+
+  /* ── The alert. A recreation of the real window, ticking. ───────── */
+  .alert{
+    background:var(--ink);
+    color:var(--on-dark);
+    min-height:100svh;
+    display:grid;
+    grid-template-rows:1fr auto;
+    text-align:center;
+    padding:2rem 1.25rem 1.5rem;
+  }
+  .alert-body{
+    display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    gap:.65rem;
+  }
+  .kicker{
+    color:var(--urgent);
+    font-weight:700;
+    font-size:clamp(.78rem,1.4vw,1.5rem);
+    letter-spacing:.22em;
+    text-transform:uppercase;
+  }
+  .meeting{font-size:clamp(1.9rem,6vw,6.5rem)}
+  .clock{
+    font-family:var(--mono);
+    font-weight:700;
+    color:var(--urgent);
+    font-size:clamp(3.5rem,21vw,24rem);
+    line-height:.9;
+    letter-spacing:-.06em;
+    font-variant-numeric:tabular-nums;
+    margin:.25rem 0 .1rem;
+  }
+  .when{color:var(--dim);font-size:clamp(.95rem,1.9vw,2rem)}
+  .fake-buttons{display:flex;gap:.7rem;margin-top:2rem;flex-wrap:wrap;justify-content:center}
+  .fake-buttons span{
+    border-radius:5px;
+    padding:.55em 1.2em;
+    font-size:clamp(.9rem,1.15vw,1.3rem);
+    font-weight:600;
+    border:1px solid #2a2b36;
+    color:var(--dim);
+  }
+  .fake-buttons span:first-child{background:#2f6fed;border-color:#2f6fed;color:#fff}
+
+  .alert-foot{
+    display:flex;justify-content:space-between;align-items:baseline;
+    gap:1rem;flex-wrap:wrap;
+    color:#54566a;font-size:clamp(.8rem,1vw,1.05rem);
+    border-top:1px solid #1c1d27;
+    padding-top:1rem;
+  }
+  .alert-foot em{font-style:normal;color:var(--dim)}
+
+  /* ── Everything below is the calm state. ────────────────────────── */
+  .calm{padding:5.5rem 0 0}
+  .lede{max-width:var(--measure)}
+  .lede h1{font-size:clamp(2.1rem,4.4vw,4.2rem);margin-bottom:1.1rem}
+  .lede p{font-size:clamp(1.1rem,1.35vw,1.5rem);color:var(--muted)}
+
+  .install{margin:2.5rem 0 0;max-width:var(--measure)}
+  .cmd{
+    display:flex;align-items:center;gap:.75rem;
+    background:var(--ink);color:var(--on-dark);
+    font-family:var(--mono);font-size:.83rem;
+    padding:.9rem 1rem;border-radius:6px;
+    overflow-x:auto;
+  }
+  .cmd code{white-space:nowrap}
+  .cmd button{
+    margin-left:auto;flex:none;
+    font:600 .72rem/1 var(--sans);
+    letter-spacing:.06em;text-transform:uppercase;
+    background:#22232e;color:var(--dim);
+    border:0;border-radius:4px;padding:.5rem .7rem;cursor:pointer;
+  }
+  .cmd button:hover,.cmd button:focus-visible{background:#2f313f;color:var(--on-dark)}
+  .install small{display:block;margin-top:.7rem;color:var(--muted);font-size:.9rem}
+  .install small a{color:var(--body)}
+
+  section{padding:4.5rem 0;border-top:1px solid var(--rule)}
+  section:first-of-type{border-top:0}
+  .calm section:first-child{border-top:0}
+  h2{font-size:clamp(1.5rem,2.6vw,2.6rem);margin-bottom:.7rem}
+  .sub{color:var(--muted);max-width:var(--measure);margin-bottom:2.25rem}
+
+  /* The tray strip, driven by the same clock as the alert above. */
+  .tray{
+    background:var(--ink);border-radius:8px;
+    padding:.6rem 1rem;display:flex;align-items:center;gap:.6rem;
+    color:var(--on-dark);font-size:.95rem;max-width:24rem;
+  }
+  .tray .dot{width:.5rem;height:.5rem;border-radius:50%;background:#3ddc84;flex:none}
+  .tray .mono{font-family:var(--mono);font-size:.8rem;color:var(--dim)}
+
+  .states{display:grid;gap:2.5rem;grid-template-columns:1fr}
+  @media(min-width:52rem){.states{grid-template-columns:1fr 1fr;gap:3.5rem}}
+  .state h3{font-size:1.05rem;margin-bottom:.5rem}
+  .state p{color:var(--muted);font-size:.97rem}
+  .state .demo{margin-bottom:1.1rem}
+  .mini-alert{
+    background:var(--ink);border-radius:8px;padding:1.6rem 1rem;
+    text-align:center;color:var(--on-dark);
+  }
+  .mini-alert .k{color:var(--urgent);font-size:.6rem;letter-spacing:.2em;font-weight:700;text-transform:uppercase}
+  .mini-alert .c{font-family:var(--mono);font-weight:700;color:var(--urgent);font-size:2.6rem;line-height:1.1;font-variant-numeric:tabular-nums}
+
+  ul.plain{list-style:none;padding:0;margin:0;max-width:44rem}
+  ul.plain li{
+    padding:1.05rem 0;border-top:1px solid var(--rule);
+    display:grid;gap:.15rem .9rem;
+    grid-template-columns:1fr;
+  }
+  @media(min-width:44rem){
+    ul.plain li{grid-template-columns:13rem 1fr;align-items:baseline}
+  }
+  ul.plain li:first-child{border-top:0}
+  ul.plain b{font-weight:600}
+  ul.plain span{color:var(--muted);font-size:.97rem}
+
+  /* Monitor diagram — proportional to a real three-display layout. */
+  .screens{display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:1.5rem}
+  .screens div{
+    border:1px solid var(--rule);border-radius:4px;background:var(--panel);
+    display:grid;place-items:center;
+    font-size:.68rem;color:var(--muted);
+    font-family:var(--mono);
+  }
+  .screens .s1{width:7.5rem;height:4.2rem}
+  .screens .s2{width:11rem;height:6.2rem}
+  .screens .s3{width:7.5rem;height:4.2rem}
+  .screens div.lit{background:var(--ink);border-color:var(--ink);color:var(--urgent)}
+
+  .modes{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1.75rem}
+  .modes button{
+    font:600 .85rem/1 var(--sans);
+    padding:.55rem .9rem;border-radius:5px;cursor:pointer;
+    border:1px solid var(--rule);background:var(--panel);color:var(--muted);
+  }
+  .modes button[aria-pressed="true"]{background:var(--body);border-color:var(--body);color:#fff}
+
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;max-width:var(--measure)}
+  ol.steps li{
+    counter-increment:s;position:relative;
+    padding:0 0 1.4rem 2.6rem;
+    color:var(--muted);font-size:.97rem;
+  }
+  ol.steps li::before{
+    content:counter(s);
+    position:absolute;left:0;top:.05rem;
+    font-family:var(--mono);font-size:.75rem;font-weight:700;
+    color:var(--body);
+    border:1px solid var(--rule);border-radius:4px;
+    width:1.7rem;height:1.7rem;display:grid;place-items:center;
+  }
+  ol.steps b{color:var(--body);font-weight:600}
+  ol.steps code,p code,li code{
+    font-family:var(--mono);font-size:.78em;
+    background:#e7e9f1;padding:.15em .4em;border-radius:3px;
+  }
+
+  figure{margin:0}
+  figure img{width:100%;height:auto;display:block;border-radius:8px;border:1px solid var(--rule)}
+  figcaption{margin-top:.75rem;color:var(--muted);font-size:.87rem}
+
+  /* Credit to the original. Given room, not tucked into a footer. */
+  .credit{background:var(--panel);border-top:1px solid var(--rule)}
+  .credit .inner{max-width:42rem}
+  .credit h2{margin-bottom:1rem}
+  .credit p{color:var(--muted);margin-bottom:1rem}
+  .credit p:last-child{margin-bottom:0}
+  .credit a{color:var(--body);text-decoration-thickness:1px;text-underline-offset:3px}
+
+  .cta{
+    display:inline-block;background:var(--body);color:#fff;
+    text-decoration:none;font-weight:600;font-size:.97rem;
+    padding:.8rem 1.4rem;border-radius:6px;margin-top:.5rem;
+  }
+  .cta:hover,.cta:focus-visible{background:#000}
+
+  footer{
+    padding:3rem 0 4rem;color:var(--muted);font-size:.87rem;
+    border-top:1px solid var(--rule);
+  }
+  footer a{color:var(--body)}
+  footer p+p{margin-top:.4rem}
+
+  :focus-visible{outline:2px solid var(--urgent);outline-offset:3px}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<!-- The page opens the way the app does: by taking the whole screen. -->
+<header class="alert">
+  <div class="alert-body">
+    <p class="kicker">Meeting starting</p>
+    <h2 class="meeting">Design review</h2>
+    <p class="clock" id="clock" aria-live="off">0:47</p>
+    <p class="when">11:00 – 11:30</p>
+    <div class="fake-buttons" aria-hidden="true">
+      <span>Join now</span>
+      <span>Dismiss (Esc)</span>
+    </div>
+  </div>
+  <div class="alert-foot">
+    <span><em>meeting-blaster</em> — this is what it does to your screen.</span>
+    <span>Keep scrolling for the other 99% of the time.</span>
+  </div>
+</header>
+
+<main class="wrap calm">
+
+  <div class="lede">
+    <h1>You stop missing meetings.</h1>
+    <p>Your next meeting sits in the Linux system tray with a live countdown. A minute before it starts, the whole screen goes red until you deal with it.</p>
+  </div>
+
+  <div class="install">
+    <div class="cmd">
+      <code id="cmd">mise use -g github:Spriz/meeting-blaster</code>
+      <button type="button" id="copy" aria-label="Copy install command">Copy</button>
+    </div>
+    <small>
+      Prebuilt binary, no compiler needed. Or
+      <a href="https://github.com/Spriz/meeting-blaster#install">build from source</a>.
+      Linux only — see below.
+    </small>
+  </div>
+
+  <section>
+    <h2>Two states, and that's the whole app</h2>
+    <p class="sub">Most of the day it stays out of your way. It only becomes loud when being quiet would cost you something.</p>
+
+    <div class="states">
+      <div class="state">
+        <div class="demo">
+          <div class="tray">
+            <span class="dot" aria-hidden="true"></span>
+            <span>Design review in <span id="tray-clock">0:47</span></span>
+          </div>
+        </div>
+        <h3>Quiet</h3>
+        <p>A tray label counting down, and a menu with the rest of today. Click any meeting to join it — Meet, Zoom, Teams, Webex and eight others are detected automatically.</p>
+      </div>
+      <div class="state">
+        <div class="demo">
+          <div class="mini-alert">
+            <p class="k">Meeting starting</p>
+            <p class="c" id="mini-clock">0:47</p>
+          </div>
+        </div>
+        <h3>Loud</h3>
+        <p>A full-screen takeover at a lead time you choose. One key joins the call, one dismisses it. It does not fade away on its own unless you ask it to.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Pick which screens it blocks</h2>
+    <p class="sub">An alert on the monitor you aren't looking at is not an alert. Choose one behaviour and it stays predictable.</p>
+
+    <div class="modes" role="group" aria-label="Alert placement">
+      <button type="button" data-mode="primary" aria-pressed="true">Primary display</button>
+      <button type="button" data-mode="all" aria-pressed="false">Every display</button>
+      <button type="button" data-mode="active" aria-pressed="false">Wherever focus is</button>
+    </div>
+
+    <div class="screens" id="screens" aria-hidden="true">
+      <div class="s1" data-i="2">HDMI-1</div>
+      <div class="s2 lit" data-i="0">DP-3</div>
+      <div class="s3" data-i="1">DP-2</div>
+    </div>
+    <p class="sub" id="mode-note" style="margin-bottom:0">Always the primary display, wherever the pointer happens to be.</p>
+  </section>
+
+  <section>
+    <h2>What it actually looks like</h2>
+    <p class="sub">Not a mockup — the alert running on a 4K display, captured from the app.</p>
+    <figure>
+      <img src="overlay.png" width="1600" height="900"
+           alt="The meeting-blaster full-screen alert on a dark background: the words MEETING STARTING in red, the meeting title Sample meeting, a large red countdown reading 0:42, the time range 08:44 to 09:14, and Join now and Dismiss buttons.">
+      <figcaption>The countdown is sized as a fraction of screen height, so it stays this legible on a laptop panel and a 4K monitor alike.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>The details</h2>
+    <ul class="plain">
+      <li><b>Calendar</b><span>Google Calendar, through your own OAuth client. Read-only — it never writes to your calendar.</span></li>
+      <li><b>Where tokens live</b><span>Your system keyring: Secret Service, Keychain, or Credential Manager. Never in a file, never in a log.</span></li>
+      <li><b>Join links</b><span>Meet, Zoom, Teams, Webex, Whereby, Jitsi, GoTo, BlueJeans, Chime, Around, Discord and Slack huddles.</span></li>
+      <li><b>Lead times</b><span>Full-screen alert and desktop notification fire independently, so you can get a nudge at five minutes and the takeover at one.</span></li>
+      <li><b>Desktop</b><span>Built and tested on Ubuntu 24.04, GNOME 46, X11 and XWayland. <code>mise run install</code> adds a menu entry and icon under your home directory, no root.</span></li>
+      <li><b>Built with</b><span>Go and Fyne, in a single binary. MIT licensed.</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Setting it up</h2>
+    <p class="sub">meeting-blaster talks to Google directly, so it needs an OAuth client of its own. This is once, and everything stays on your machine.</p>
+    <ol class="steps">
+      <li><b>Create a Google Cloud project.</b> Any name will do.</li>
+      <li><b>Enable the Google Calendar API</b> for that project.</li>
+      <li><b>Configure the consent screen</b> as External, and add yourself as a test user.</li>
+      <li><b>Create an OAuth client ID</b> of type Desktop app.</li>
+      <li><b>Save the downloaded JSON</b> to <code>~/.config/meeting-blaster/credentials.json</code>, then start the app. It opens your browser to sign in.</li>
+    </ol>
+    <a class="cta" href="https://github.com/Spriz/meeting-blaster#setup">Full setup instructions</a>
+  </section>
+
+</main>
+
+<section class="credit">
+  <div class="wrap inner">
+    <h2>This is a Linux answer to MeetingBar</h2>
+    <p><a href="https://meetingbar.app">MeetingBar</a>, by <a href="https://github.com/leits">Andrii Leitsius</a>, has put meetings in the macOS menu bar for years and does it beautifully. It is the reason this app exists, and the reason it works the way it does — the tray countdown, the one-click join, the lead times are all its ideas.</p>
+    <p>MeetingBar is macOS-only. meeting-blaster is an independent reimplementation for Linux, written from scratch in Go. It shares no code with MeetingBar and is not affiliated with or endorsed by it. If you are on a Mac, install MeetingBar instead — it is more capable and more polished than this.</p>
+    <p>MeetingBar is Apache-2.0 licensed and lives at <a href="https://github.com/leits/MeetingBar">github.com/leits/MeetingBar</a>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><a href="https://github.com/Spriz/meeting-blaster">github.com/Spriz/meeting-blaster</a> — MIT licensed.</p>
+    <p>Linux is the only platform built and tested. macOS and Windows sources compile but have never been run.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var clocks = ['clock','tray-clock','mini-clock'].map(function(id){
+    return document.getElementById(id);
+  }).filter(Boolean);
+
+  // One timer drives every clock on the page, so the tray strip and the
+  // alert always agree - exactly as they do in the app.
+  var seconds = 47;
+  function render(){
+    var label;
+    if (seconds > 0) {
+      label = Math.floor(seconds/60) + ':' + String(seconds%60).padStart(2,'0');
+    } else {
+      label = 'NOW';
+    }
+    clocks.forEach(function(el){ el.textContent = label; });
+  }
+  render();
+
+  if (!reduced) {
+    setInterval(function(){
+      seconds = seconds > -3 ? seconds - 1 : 47;
+      render();
+    }, 1000);
+  }
+
+  // Copy the install command.
+  var btn = document.getElementById('copy');
+  btn.addEventListener('click', function(){
+    var text = document.getElementById('cmd').textContent;
+    navigator.clipboard.writeText(text).then(function(){
+      btn.textContent = 'Copied';
+      setTimeout(function(){ btn.textContent = 'Copy'; }, 1600);
+    }, function(){
+      btn.textContent = 'Press ⌘C';
+      setTimeout(function(){ btn.textContent = 'Copy'; }, 1600);
+    });
+  });
+
+  // Monitor placement demo.
+  var notes = {
+    primary: 'Always the primary display, wherever the pointer happens to be.',
+    all:     'Every connected display at once. The hardest to ignore.',
+    active:  'Wherever the window manager opens it — usually the focused display.'
+  };
+  var lit = { primary:[0], all:[0,1,2], active:[1] };
+  var screens = document.getElementById('screens');
+  var note = document.getElementById('mode-note');
+
+  document.querySelectorAll('.modes button').forEach(function(b){
+    b.addEventListener('click', function(){
+      var mode = b.dataset.mode;
+      document.querySelectorAll('.modes button').forEach(function(o){
+        o.setAttribute('aria-pressed', String(o === b));
+      });
+      note.textContent = notes[mode];
+      screens.querySelectorAll('div').forEach(function(d){
+        d.classList.toggle('lit', lit[mode].indexOf(Number(d.dataset.i)) !== -1);
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
