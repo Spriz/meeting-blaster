@@ -1,8 +1,9 @@
 // Package engine is the scheduling core: it polls the calendar, tracks which
 // meeting is next, and decides when to alert.
 //
-// It owns no UI. Callers supply callbacks and the engine invokes them from a
-// background goroutine, so callbacks must marshal onto their own UI thread.
+// It owns no UI. OnState callbacks are serialized, but SetConfig can invoke
+// them synchronously on its caller's goroutine. Callers must marshal UI work
+// onto their own UI thread.
 package engine
 
 import (
@@ -34,8 +35,9 @@ type State struct {
 
 // Callbacks receive engine output. Any may be nil.
 type Callbacks struct {
-	// OnState fires on every tick and every poll, roughly once a second.
-	// It drives the tray label, so it must be cheap.
+	// OnState publishes the latest state after ticks, polls, and configuration
+	// changes. Calls are serialized and overlapping updates coalesce; SetConfig
+	// may invoke it synchronously. It drives the tray.
 	OnState func(State)
 
 	// OnAlert fires once per event, AlertLead before it starts. This
@@ -58,6 +60,11 @@ type Engine struct {
 	mu    sync.RWMutex
 	cfg   config.Config
 	state State
+
+	// publishing and pending serialize OnState callbacks without holding mu
+	// during a callback.
+	publishing bool
+	pending    bool
 
 	// fired records which alerts have already been delivered, keyed by
 	// event identity, so an alert shows exactly once even though the tick
@@ -130,12 +137,16 @@ func (e *Engine) Config() config.Config {
 	return e.cfg
 }
 
-// SetConfig replaces the settings and triggers an immediate refetch, since
-// the calendar selection may have changed.
+// SetConfig replaces the settings, filters cached events to the new selection,
+// and triggers an immediate refetch.
 func (e *Engine) SetConfig(cfg config.Config) {
 	e.mu.Lock()
 	e.cfg = cfg
+	e.state.Events = Filter(e.state.Events, cfg)
+	e.state.Next = NextMeeting(e.state.Events, e.now())
 	e.mu.Unlock()
+
+	e.emit()
 	e.Refresh()
 }
 
@@ -175,7 +186,6 @@ func (e *Engine) Run(ctx context.Context) {
 
 // poll fetches events and republishes state.
 func (e *Engine) poll(ctx context.Context) {
-	cfg := e.Config()
 	now := e.now()
 	from, to := dayWindow(now)
 
@@ -187,26 +197,23 @@ func (e *Engine) poll(ctx context.Context) {
 		e.log.Warn("calendar poll failed", "error", err)
 		e.mu.Lock()
 		e.state.Err = err
-		state := e.state
 		e.mu.Unlock()
-		e.emit(state)
+		e.emit()
 		return
 	}
 
-	events = Filter(events, cfg)
-
 	e.mu.Lock()
+	events = Filter(events, e.cfg)
 	e.state = State{
 		Events:    events,
 		Next:      NextMeeting(events, e.now()),
 		Err:       nil,
 		UpdatedAt: e.now(),
 	}
-	state := e.state
 	e.mu.Unlock()
 
 	e.log.Debug("calendar polled", "events", len(events))
-	e.emit(state)
+	e.emit()
 	e.tick()
 }
 
@@ -218,7 +225,6 @@ func (e *Engine) tick() {
 	cfg := e.cfg
 	e.state.Next = NextMeeting(e.state.Events, now)
 	events := e.state.Events
-	state := e.state
 
 	var alerts, notifies []calendar.Event
 	for _, ev := range events {
@@ -240,7 +246,7 @@ func (e *Engine) tick() {
 	e.pruneFired(now)
 	e.mu.Unlock()
 
-	e.emit(state)
+	e.emit()
 
 	for _, ev := range notifies {
 		if e.cb.OnNotify != nil {
@@ -254,9 +260,34 @@ func (e *Engine) tick() {
 	}
 }
 
-func (e *Engine) emit(s State) {
-	if e.cb.OnState != nil {
-		e.cb.OnState(s)
+func (e *Engine) emit() {
+	callback := e.cb.OnState
+	if callback == nil {
+		return
+	}
+
+	e.mu.Lock()
+	if e.publishing {
+		e.pending = true
+		e.mu.Unlock()
+		return
+	}
+	e.publishing = true
+	state := e.state
+	e.mu.Unlock()
+
+	for {
+		callback(state)
+
+		e.mu.Lock()
+		if !e.pending {
+			e.publishing = false
+			e.mu.Unlock()
+			return
+		}
+		e.pending = false
+		state = e.state
+		e.mu.Unlock()
 	}
 }
 

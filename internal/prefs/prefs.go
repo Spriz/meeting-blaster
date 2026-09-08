@@ -5,6 +5,7 @@ package prefs
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -65,6 +66,7 @@ func (w *Window) show(cfg config.Config) {
 	})
 
 	edited := cfg
+	edited.ICSSources = slices.Clone(cfg.ICSSources)
 
 	// --- alerting -------------------------------------------------------
 	alertEntry := widget.NewEntry()
@@ -120,20 +122,19 @@ func (w *Window) show(cfg config.Config) {
 	browserEntry.SetText(cfg.JoinBrowser)
 
 	// --- calendars ------------------------------------------------------
-	// Loaded asynchronously: the window must open instantly even if the
-	// network is slow.
-	calendarBox := container.NewVBox(widget.NewLabel("Loading calendars…"))
+	// Sources are shown immediately; the provider only enriches their names
+	// after its background lookup completes.
 	calendarNames := make(map[string]string)
-	selected := make(map[string]bool, len(cfg.CalendarIDs))
+	selected := make(map[string]bool, len(cfg.CalendarIDs)+len(cfg.ICSSources))
 	for _, id := range cfg.CalendarIDs {
 		selected[id] = true
 	}
+	for _, src := range cfg.ICSSources {
+		id := config.SourceICS + ":" + src.ID
+		selected[id] = cfg.Watches(id)
+	}
 
 	status := widget.NewLabel("")
-
-	// --- calendar subscriptions -----------------------------------------
-	// Edited in place on `edited`, which Save persists and hands to
-	// OnSave; the live ICS provider picks the list up from there.
 	sourceBox := container.NewVBox()
 
 	var redrawSources func()
@@ -144,7 +145,9 @@ func (w *Window) show(cfg config.Config) {
 		}
 		for _, src := range edited.ICSSources {
 			id := src.ID
-			name := subscriptionLabel(src, calendarNames)
+			calendarID := config.SourceICS + ":" + id
+			show := widget.NewCheck("Show", func(v bool) { selected[calendarID] = v })
+			show.SetChecked(selected[calendarID])
 			remove := widget.NewButton("Remove", func() {
 				for i := range edited.ICSSources {
 					if edited.ICSSources[i].ID == id {
@@ -152,14 +155,14 @@ func (w *Window) show(cfg config.Config) {
 						break
 					}
 				}
-				// Save writes back selectedIDs(selected), so the
-				// watch entry has to go too; otherwise it lingers
-				// pointing at a subscription that no longer exists.
-				delete(selected, config.SourceICS+":"+id)
+				delete(selected, calendarID)
 				redrawSources()
 				sourceBox.Refresh()
+				if content := win.Content(); content != nil {
+					content.Refresh()
+				}
 			})
-			sourceBox.Add(container.NewBorder(nil, nil, nil, remove, widget.NewLabel(name)))
+			sourceBox.Add(container.NewBorder(nil, nil, nil, container.NewHBox(show, remove), widget.NewLabel(subscriptionLabel(src, calendarNames))))
 		}
 	}
 
@@ -180,15 +183,14 @@ func (w *Window) show(cfg config.Config) {
 			}
 		}
 		edited.ICSSources = append(edited.ICSSources, config.ICSSource{ID: id, URL: url})
-		// An empty selection already means "watch everything", so
-		// seeding it here would narrow the watch list to this one feed.
-		if len(selected) > 0 {
-			selected[config.SourceICS+":"+id] = true
-		}
+		selected[config.SourceICS+":"+id] = true
 		status.SetText("")
 		urlEntry.SetText("")
 		redrawSources()
 		sourceBox.Refresh()
+		if content := win.Content(); content != nil {
+			content.Refresh()
+		}
 	})
 
 	save := widget.NewButton("Save", func() {
@@ -219,6 +221,7 @@ func (w *Window) show(cfg config.Config) {
 		edited.TitleMaxLen = length
 		edited.JoinBrowser = browserEntry.Text
 		edited.CalendarIDs = selectedIDs(selected)
+		edited.CalendarSelectionExplicit = true
 
 		if err := config.Save(edited); err != nil {
 			status.SetText("Could not save: " + err.Error())
@@ -247,24 +250,16 @@ func (w *Window) show(cfg config.Config) {
 		hideDeclined,
 		widget.NewSeparator(),
 
-		widget.NewLabelWithStyle("Calendar subscriptions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Calendars", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Show meetings in the tray, agenda, and alerts.\nTurn every calendar off to hide all meetings."),
 		sourceBox,
 		container.NewBorder(nil, nil, nil, addSource, urlEntry),
-		widget.NewLabel("Subscriptions appear in the calendar list below after saving and restarting."),
 		widget.NewSeparator(),
-
-		widget.NewLabelWithStyle("Calendars", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("Unticking everything watches all calendars."),
 	)
 
-	// The settings and the calendar list scroll together as one column.
-	// Putting the list in the centre of a Border layout gave it only the
-	// space the form left over, which on a full calendar account was a
-	// couple of pixels.
-	// Padding keeps the entry fields clear of the scrollbar, which
-	// otherwise sits on top of their right edge.
+	// Keep the settings in one scrollable column, with padding clear of the scrollbar.
 	scrolling := container.NewVScroll(
-		container.NewPadded(container.NewVBox(form, calendarBox)),
+		container.NewPadded(form),
 	)
 
 	content := container.NewBorder(
@@ -275,12 +270,15 @@ func (w *Window) show(cfg config.Config) {
 	)
 
 	redrawSources()
-	go w.loadCalendars(calendarBox, selected, func(cals []calendar.Calendar) {
+	go w.loadCalendars(func(cals []calendar.Calendar) {
 		for _, cal := range cals {
 			calendarNames[cal.ID] = cal.Name
 		}
 		redrawSources()
 		sourceBox.Refresh()
+		if content := win.Content(); content != nil {
+			content.Refresh()
+		}
 	})
 
 	win.SetContent(content)
@@ -291,33 +289,16 @@ func (w *Window) show(cfg config.Config) {
 	scrolling.ScrollToTop()
 }
 
-// loadCalendars fetches the calendar list off the UI thread, then swaps the
-// placeholder for real checkboxes and supplies subscription names on the UI thread.
-func (w *Window) loadCalendars(box *fyne.Container, selected map[string]bool, onLoaded func([]calendar.Calendar)) {
+// loadCalendars fetches names off the UI thread, then delivers them on the UI thread.
+func (w *Window) loadCalendars(onLoaded func([]calendar.Calendar)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	cals, err := w.provider.Calendars(ctx)
-
-	fyne.Do(func() {
-		box.RemoveAll()
-		if err != nil {
-			box.Add(widget.NewLabel("Could not load calendars:\n" + err.Error()))
-			box.Refresh()
-			return
-		}
-		onLoaded(cals)
-		for _, cal := range cals {
-			id, name := cal.ID, cal.Name
-			if cal.Primary {
-				name += "  (primary)"
-			}
-			check := widget.NewCheck(name, func(v bool) { selected[id] = v })
-			check.SetChecked(selected[id])
-			box.Add(check)
-		}
-		box.Refresh()
-	})
+	if err != nil {
+		return
+	}
+	fyne.Do(func() { onLoaded(cals) })
 }
 
 func subscriptionLabel(src config.ICSSource, calendarNames map[string]string) string {

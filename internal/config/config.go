@@ -23,8 +23,13 @@ const AppName = "meeting-blaster"
 
 // Config is the full set of user-tunable settings.
 type Config struct {
-	// CalendarIDs limits which calendars are watched. Empty means all.
+	// CalendarIDs is an exact allowlist when nonempty. An empty list preserves
+	// legacy watch-all behavior unless CalendarSelectionExplicit is true.
 	CalendarIDs []string `json:"calendar_ids"`
+
+	// CalendarSelectionExplicit distinguishes an intentional empty selection
+	// (watch none) from a legacy empty CalendarIDs list (watch all).
+	CalendarSelectionExplicit bool `json:"calendar_selection_explicit,omitempty"`
 
 	// ICSSources are iCalendar subscriptions: webcal:// or https:// feed
 	// URLs, or paths to .ics files on disk.
@@ -201,7 +206,7 @@ func (c Config) TimeLayout() string {
 // Watches reports whether the given calendar is selected.
 func (c Config) Watches(calendarID string) bool {
 	if len(c.CalendarIDs) == 0 {
-		return true
+		return !c.CalendarSelectionExplicit
 	}
 	for _, id := range c.CalendarIDs {
 		if id == calendarID {
@@ -211,13 +216,11 @@ func (c Config) Watches(calendarID string) bool {
 	return false
 }
 
-// Watch returns a copy with calendarID added to the watch list. An empty
-// list already means "watch everything", so it is left empty: otherwise
-// adding a subscription would narrow the selection to just that one.
-// Conversely, a user who has ticked specific calendars would add a
-// subscription and silently never see its events.
+// Watch returns a copy with calendarID added to the selected calendars. A
+// legacy empty selection means watch all and remains empty; an explicit empty
+// selection means watch none and is widened to only calendarID.
 func (c Config) Watch(calendarID string) Config {
-	if len(c.CalendarIDs) == 0 {
+	if len(c.CalendarIDs) == 0 && !c.CalendarSelectionExplicit {
 		return c
 	}
 	for _, id := range c.CalendarIDs {

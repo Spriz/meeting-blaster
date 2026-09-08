@@ -68,21 +68,72 @@ func TestDurationJSON(t *testing.T) {
 	})
 }
 
-func TestWatches(t *testing.T) {
-	t.Run("empty selection watches everything", func(t *testing.T) {
-		if !(Config{}).Watches("anything") {
-			t.Error("empty CalendarIDs should watch all calendars")
+func TestCalendarSelection(t *testing.T) {
+	t.Run("explicit empty selection watches nothing", func(t *testing.T) {
+		var cfg Config
+		if err := json.Unmarshal([]byte(`{"calendar_ids":[],"calendar_selection_explicit":true}`), &cfg); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, calendarID := range []string{"ics:work", "ics:personal"} {
+			if cfg.Watches(calendarID) {
+				t.Errorf("explicit empty selection watched %q", calendarID)
+			}
 		}
 	})
-	t.Run("selection is respected", func(t *testing.T) {
-		cfg := Config{CalendarIDs: []string{"work"}}
-		if !cfg.Watches("work") {
-			t.Error("selected calendar should be watched")
+
+	t.Run("legacy empty selection watches everything", func(t *testing.T) {
+		var cfg Config
+		if err := json.Unmarshal([]byte(`{"calendar_ids":[]}`), &cfg); err != nil {
+			t.Fatal(err)
 		}
-		if cfg.Watches("personal") {
-			t.Error("unselected calendar should not be watched")
+
+		for _, calendarID := range []string{"ics:work", "ics:personal"} {
+			if !cfg.Watches(calendarID) {
+				t.Errorf("legacy empty selection did not watch %q", calendarID)
+			}
 		}
 	})
+
+	t.Run("nonempty selection watches exactly selected calendars", func(t *testing.T) {
+		var cfg Config
+		if err := json.Unmarshal([]byte(`{"calendar_ids":["ics:work"]}`), &cfg); err != nil {
+			t.Fatal(err)
+		}
+
+		if !cfg.Watches("ics:work") {
+			t.Error("selected calendar was not watched")
+		}
+		if cfg.Watches("ics:personal") {
+			t.Error("unselected calendar was watched")
+		}
+	})
+}
+
+func TestExplicitEmptyCalendarSelectionSurvivesReload(t *testing.T) {
+	path := isolateConfigDir(t)
+	if err := os.WriteFile(path, []byte(`{"calendar_ids":[],"calendar_selection_explicit":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Watches("ics:work") {
+		t.Error("loaded explicit empty selection watched a calendar")
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Watches("ics:work") {
+		t.Error("reloaded explicit empty selection watched a calendar")
+	}
 }
 
 func TestTimeLayout(t *testing.T) {
@@ -266,33 +317,45 @@ func TestNormalizeCalendarURL(t *testing.T) {
 	})
 }
 
-func TestWatchAddsOnlyToANarrowedSelection(t *testing.T) {
-	t.Run("empty selection stays empty", func(t *testing.T) {
-		// An empty list already means "watch everything"; adding one ID
-		// would narrow it to just that subscription.
+func TestWatchPreservesSelectionSemantics(t *testing.T) {
+	t.Run("legacy empty selection stays all", func(t *testing.T) {
 		cfg := Config{}.Watch("ics:abc12345")
-		if len(cfg.CalendarIDs) != 0 {
-			t.Errorf("got %v, want it left empty", cfg.CalendarIDs)
+		for _, calendarID := range []string{"ics:abc12345", "ics:work"} {
+			if !cfg.Watches(calendarID) {
+				t.Errorf("legacy empty selection did not watch %q", calendarID)
+			}
 		}
 	})
 
 	t.Run("narrowed selection gains the new calendar", func(t *testing.T) {
 		cfg := Config{CalendarIDs: []string{"ics:work"}}.Watch("ics:abc12345")
-		if len(cfg.CalendarIDs) != 2 || cfg.CalendarIDs[1] != "ics:abc12345" {
-			t.Errorf("got %v, want the ID appended", cfg.CalendarIDs)
+		if !cfg.Watches("ics:work") || !cfg.Watches("ics:abc12345") {
+			t.Error("selected calendars were not watched")
+		}
+		if cfg.Watches("ics:personal") {
+			t.Error("unselected calendar was watched")
 		}
 	})
 
-	t.Run("already present is not duplicated", func(t *testing.T) {
-		cfg := Config{CalendarIDs: []string{"ics:abc12345"}}.Watch("ics:abc12345")
-		if len(cfg.CalendarIDs) != 1 {
-			t.Errorf("got %v, want no duplicate", cfg.CalendarIDs)
+	t.Run("explicit empty selection enables only the new calendar", func(t *testing.T) {
+		var original Config
+		if err := json.Unmarshal([]byte(`{"calendar_ids":[],"calendar_selection_explicit":true}`), &original); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := original.Watch("ics:abc12345")
+		if original.Watches("ics:abc12345") {
+			t.Error("Watch changed the original explicit empty selection")
+		}
+		if !cfg.Watches("ics:abc12345") {
+			t.Error("new calendar was not watched")
+		}
+		if cfg.Watches("ics:work") {
+			t.Error("unselected calendar was watched")
 		}
 	})
 
-	t.Run("does not write into the caller's backing array", func(t *testing.T) {
-		// A bare append into spare capacity would make the second call
-		// overwrite the first call's result.
+	t.Run("results have independent selections", func(t *testing.T) {
 		ids := make([]string, 1, 4)
 		ids[0] = "ics:work"
 		base := Config{CalendarIDs: ids}
@@ -300,11 +363,11 @@ func TestWatchAddsOnlyToANarrowedSelection(t *testing.T) {
 		a := base.Watch("ics:aaaaaaaa")
 		b := base.Watch("ics:bbbbbbbb")
 
-		if a.CalendarIDs[1] != "ics:aaaaaaaa" {
-			t.Errorf("first result became %v after a second Watch", a.CalendarIDs)
+		if !a.Watches("ics:work") || !a.Watches("ics:aaaaaaaa") || a.Watches("ics:bbbbbbbb") {
+			t.Errorf("first result selected the wrong calendars")
 		}
-		if b.CalendarIDs[1] != "ics:bbbbbbbb" {
-			t.Errorf("second result = %v", b.CalendarIDs)
+		if !b.Watches("ics:work") || !b.Watches("ics:bbbbbbbb") || b.Watches("ics:aaaaaaaa") {
+			t.Errorf("second result selected the wrong calendars")
 		}
 	})
 }

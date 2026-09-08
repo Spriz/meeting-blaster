@@ -174,7 +174,7 @@ often only every few hours, so a meeting added this morning may not appear
 today. `poll_interval` cannot improve that — it controls how often the app
 refetches the feed, not how often the provider regenerates it.
 
-Subscriptions are also managed from **Preferences…** in the tray menu.
+Subscriptions are also managed from **Preferences…** in the tray menu. Each configured feed has a safe name with **Show** and **Remove** controls; **Show** controls its meetings in the tray, agenda, and alerts. Add a feed below the list, then save to apply the selection immediately—no restart is needed.
 
 ## Usage
 
@@ -196,7 +196,8 @@ Settings live in `~/.config/meeting-blaster/config.json` and are editable from
 | `overlay_timeout` | `0s` | auto-dismiss the overlay; `0` means never |
 | `overlay_monitors` | `primary` | which displays the alert blocks: `primary`, `all`, or `active` |
 | `poll_interval` | `2m` | how often the calendar is refetched |
-| `calendar_ids` | `[]` | which subscriptions to watch; empty means all. IDs remain namespaced by source, for example `ics:9f2a1c0b` |
+| `calendar_ids` | `[]` | exact allowlist selected with **Show** in Preferences. Stable IDs remain namespaced by source, for example `ics:9f2a1c0b`. |
+| `calendar_selection_explicit` | `false` | with empty `calendar_ids`, `false` keeps legacy all-calendars behavior; `true` selects none. |
 | `ics_sources` | `[]` | iCalendar subscriptions; each is `{"id", "url", "name", "email"}`, and `--add-calendar` fills them in. Lists use the name, not the full URL. |
 | `use_24_hour` | `true` | clock format |
 | `title_max_len` | `30` | truncation for the tray label |

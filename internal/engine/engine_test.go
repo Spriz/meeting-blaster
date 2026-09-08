@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -257,6 +259,301 @@ func TestAlertFiresExactlyOnce(t *testing.T) {
 	}
 }
 
+type eventsThenErrorProvider struct {
+	events []calendar.Event
+	calls  int
+}
+
+func (p *eventsThenErrorProvider) Name() string { return "test" }
+func (p *eventsThenErrorProvider) Calendars(context.Context) ([]calendar.Calendar, error) {
+	return nil, nil
+}
+func (p *eventsThenErrorProvider) Events(context.Context, time.Time, time.Time) ([]calendar.Event, error) {
+	p.calls++
+	if p.calls == 1 {
+		return p.events, nil
+	}
+	return nil, errors.New("calendar unavailable")
+}
+
+type blockingProvider struct {
+	events  []calendar.Event
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingProvider) Name() string { return "test" }
+func (p *blockingProvider) Calendars(context.Context) ([]calendar.Calendar, error) {
+	return nil, nil
+}
+func (p *blockingProvider) Events(ctx context.Context, _ time.Time, _ time.Time) ([]calendar.Event, error) {
+	close(p.started)
+	select {
+	case <-p.release:
+		return p.events, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestSetConfigFiltersCachedEventsAfterFailedRefresh(t *testing.T) {
+	cfg := config.Default()
+	cfg.AlertLead = config.Duration(5 * time.Minute)
+	cfg.NotifyLead = 0
+	work := ev("work", 10*time.Minute, time.Hour)
+	work.CalendarID = "work"
+	personal := ev("personal", 6*time.Minute, time.Hour)
+	personal.CalendarID = "personal"
+
+	var states []State
+	var alerts []string
+	e := New(&eventsThenErrorProvider{events: []calendar.Event{work, personal}}, cfg, Callbacks{
+		OnState: func(state State) { states = append(states, state) },
+		OnAlert: func(event calendar.Event) { alerts = append(alerts, event.ID) },
+	}, nil)
+	e.now = func() time.Time { return base }
+	e.poll(context.Background())
+	states = nil
+
+	onlyWork := cfg
+	onlyWork.CalendarIDs = []string{"work"}
+	e.SetConfig(onlyWork)
+
+	if len(states) != 1 {
+		t.Fatalf("SetConfig published %d states, want 1", len(states))
+	}
+	if got := ids(states[0].Events); len(got) != 1 || got[0] != "work" {
+		t.Fatalf("published events = %v, want [work]", got)
+	}
+	if states[0].Next == nil || states[0].Next.ID != "work" {
+		t.Fatalf("published next = %v, want work", states[0].Next)
+	}
+
+	e.poll(context.Background())
+	state := e.Snapshot()
+	if state.Err == nil {
+		t.Fatal("failed refresh did not report an error")
+	}
+	if got := ids(state.Events); len(got) != 1 || got[0] != "work" {
+		t.Fatalf("events after failed refresh = %v, want [work]", got)
+	}
+	if state.Next == nil || state.Next.ID != "work" {
+		t.Fatalf("next after failed refresh = %v, want work", state.Next)
+	}
+
+	e.now = func() time.Time { return base.Add(5 * time.Minute) }
+	e.tick()
+	if len(alerts) != 1 || alerts[0] != "work" {
+		t.Fatalf("alerts after selection change = %v, want [work]", alerts)
+	}
+}
+
+func TestPollUsesLatestConfigAfterSelectionChangesDuringFetch(t *testing.T) {
+	cfg := config.Default()
+	cfg.AlertLead = config.Duration(5 * time.Minute)
+	cfg.NotifyLead = 0
+	work := ev("work", 5*time.Minute, time.Hour)
+	work.CalendarID = "work"
+	personal := ev("personal", 5*time.Minute, time.Hour)
+	personal.CalendarID = "personal"
+	provider := &blockingProvider{
+		events:  []calendar.Event{work, personal},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	defer func() {
+		select {
+		case <-provider.release:
+		default:
+			close(provider.release)
+		}
+	}()
+
+	var alerts []string
+	e := New(provider, cfg, Callbacks{
+		OnAlert: func(event calendar.Event) { alerts = append(alerts, event.ID) },
+	}, nil)
+	e.now = func() time.Time { return base }
+	done := make(chan struct{})
+	go func() {
+		e.poll(context.Background())
+		close(done)
+	}()
+
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not begin its fetch")
+	}
+
+	onlyWork := cfg
+	onlyWork.CalendarIDs = []string{"work"}
+	e.SetConfig(onlyWork)
+	close(provider.release)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not finish after fetch was released")
+	}
+
+	state := e.Snapshot()
+	if got := ids(state.Events); len(got) != 1 || got[0] != "work" {
+		t.Fatalf("events after in-flight poll = %v, want [work]", got)
+	}
+	if len(alerts) != 1 || alerts[0] != "work" {
+		t.Fatalf("alerts after in-flight poll = %v, want [work]", alerts)
+	}
+}
+func TestStatePublicationCoalescesToLatestState(t *testing.T) {
+	all := config.Default()
+	work := ev("work", 10*time.Minute, time.Hour)
+	work.CalendarID = "work"
+	personal := ev("personal", 5*time.Minute, time.Hour)
+	personal.CalendarID = "personal"
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	defer func() { releaseOnce.Do(func() { close(releaseFirst) }) }()
+
+	var mu sync.Mutex
+	var published []State
+	active := 0
+	overlapped := false
+	calls := 0
+	e := New(nil, all, Callbacks{
+		OnState: func(state State) {
+			mu.Lock()
+			active++
+			if active > 1 {
+				overlapped = true
+			}
+			calls++
+			call := calls
+			mu.Unlock()
+
+			if call == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			}
+
+			mu.Lock()
+			published = append(published, state)
+			active--
+			mu.Unlock()
+		},
+	}, nil)
+	e.now = func() time.Time { return base }
+	e.state.Events = []calendar.Event{personal, work}
+	e.state.Next = NextMeeting(e.state.Events, base)
+
+	firstDone := make(chan struct{})
+	go func() {
+		e.SetConfig(all)
+		close(firstDone)
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first state publication did not start")
+	}
+
+	onlyWork := all
+	onlyWork.CalendarIDs = []string{"work"}
+	onlyWorkDone := make(chan struct{})
+	go func() {
+		e.SetConfig(onlyWork)
+		close(onlyWorkDone)
+	}()
+	select {
+	case <-onlyWorkDone:
+	case <-time.After(time.Second):
+		t.Fatal("SetConfig blocked behind an active state callback")
+	}
+
+	none := all
+	none.CalendarSelectionExplicit = true
+	noneDone := make(chan struct{})
+	go func() {
+		e.SetConfig(none)
+		close(noneDone)
+	}()
+	select {
+	case <-noneDone:
+	case <-time.After(time.Second):
+		t.Fatal("second SetConfig blocked behind an active state callback")
+	}
+
+	releaseOnce.Do(func() { close(releaseFirst) })
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("initial SetConfig did not finish after publication was released")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if overlapped {
+		t.Error("OnState callbacks overlapped")
+	}
+	if len(published) != 2 {
+		t.Fatalf("published %d states, want initial and latest only", len(published))
+	}
+	if len(published[len(published)-1].Events) != 0 {
+		t.Fatalf("last published events = %v, want no hidden events", ids(published[len(published)-1].Events))
+	}
+}
+
+func TestStatePublicationAllowsReentrantSetConfig(t *testing.T) {
+	all := config.Default()
+	work := ev("work", 10*time.Minute, time.Hour)
+	work.CalendarID = "work"
+
+	var e *Engine
+	calls := 0
+	active := 0
+	overlapped := false
+	e = New(nil, all, Callbacks{
+		OnState: func(State) {
+			active++
+			if active > 1 {
+				overlapped = true
+			}
+			calls++
+			if calls == 1 {
+				none := all
+				none.CalendarSelectionExplicit = true
+				e.SetConfig(none)
+			}
+			active--
+		},
+	}, nil)
+	e.now = func() time.Time { return base }
+	e.state.Events = []calendar.Event{work}
+	e.state.Next = NextMeeting(e.state.Events, base)
+
+	done := make(chan struct{})
+	go func() {
+		e.SetConfig(all)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("reentrant SetConfig deadlocked state publication")
+	}
+
+	if overlapped {
+		t.Error("reentrant SetConfig invoked OnState concurrently")
+	}
+	if calls != 2 {
+		t.Errorf("OnState calls = %d, want 2", calls)
+	}
+	if state := e.Snapshot(); len(state.Events) != 0 {
+		t.Fatalf("state after reentrant selection = %v, want no events", ids(state.Events))
+	}
+}
 func ids(events []calendar.Event) []string {
 	out := make([]string, len(events))
 	for i, e := range events {
