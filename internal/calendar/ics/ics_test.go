@@ -56,7 +56,7 @@ func TestExpandsRecurrenceWithExdateAndOverride(t *testing.T) {
 
 	// The series runs weekly for six occurrences from 1 June. Two are
 	// excluded by the multi-value EXDATE, one is moved by an override,
-	// one is cancelled by an override, and the sixth is past `to`.
+	// one is cancelled by an override, and the sixth is past the window.
 	want := []struct {
 		start time.Time
 		title string
@@ -387,15 +387,16 @@ func TestParseICalDuration(t *testing.T) {
 
 func TestCalendarsNameSources(t *testing.T) {
 	cals, err := New([]Source{
-		{ID: "a", URL: "testdata/recurring.ics"},          // X-WR-CALNAME
-		{ID: "b", URL: "testdata/links.ics"},              // no name: use the file
-		{ID: "c", Name: "Mine", URL: "testdata/nope.ics"}, // unfetchable, still listed
+		{ID: "a", URL: "testdata/recurring.ics"},               // X-WR-CALNAME
+		{ID: "b", URL: "testdata/links.ics"},                   // no feed name
+		{ID: "c", Name: "Mine", URL: "testdata/recurring.ics"}, // configured name wins
+		{ID: "d", URL: "testdata/nope.ics"},                    // unfetchable, still listed
 	}, quiet()).Calendars(context.Background())
 	if err != nil {
 		t.Fatalf("Calendars: %v", err)
 	}
 
-	want := []string{"Team calendar", "links", "Mine"}
+	want := []string{"Team calendar", "Calendar b", "Mine", "Calendar d"}
 	if len(cals) != len(want) {
 		t.Fatalf("got %d calendars, want %d", len(cals), len(want))
 	}

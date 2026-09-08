@@ -1,8 +1,8 @@
 // Package multi presents several calendar providers as one, namespacing
 // their calendar IDs so two sources cannot collide.
 //
-// Prefixing is unconditional, including for a single source, which is what
-// config.migrateCalendarIDs compensates for on existing installs.
+// Prefixing is unconditional, including for a single source, so saved
+// selections always use the source namespace.
 package multi
 
 import (
@@ -17,7 +17,7 @@ import (
 )
 
 // Source pairs a provider with the key that prefixes its calendar IDs.
-// Keys come from config: config.SourceGoogle, config.SourceICS.
+// Keys identify the source namespace and are supplied by the caller.
 type Source struct {
 	Key      string
 	Provider calendar.Provider
@@ -101,8 +101,8 @@ func (p *Provider) Calendars(ctx context.Context) ([]calendar.Calendar, error) {
 // Events implements calendar.Provider.
 //
 // Partial failure is success: engine.poll discards the whole event set when
-// the provider errors, so a Google token that needs re-auth must not blank
-// out working ICS feeds. Only when every child fails is an error returned.
+// the provider errors, so one failing source must not blank out working
+// subscriptions. Only when every child fails is an error returned.
 func (p *Provider) Events(ctx context.Context, from, to time.Time) ([]calendar.Event, error) {
 	type reply struct {
 		events []calendar.Event

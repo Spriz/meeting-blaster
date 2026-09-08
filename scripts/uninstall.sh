@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Removes everything install.sh created. Settings and stored tokens are left
+# Removes everything install.sh created. Settings and subscriptions are left
 # alone; see the notes printed at the end for how to clear those too.
 set -euo pipefail
 
@@ -35,9 +35,7 @@ command -v update-desktop-database >/dev/null 2>&1 &&
 
 echo
 echo "Left in place:"
-echo "  ${XDG_CONFIG_HOME:-$HOME/.config}/meeting-blaster/  (settings and OAuth client)"
-echo "  your OAuth token in the system keyring"
+echo "  ${XDG_CONFIG_HOME:-$HOME/.config}/meeting-blaster/  (settings and subscriptions)"
 echo
 echo "To remove those too:"
-echo "  meeting-blaster --logout    # before deleting the binary"
 echo "  rm -rf ${XDG_CONFIG_HOME:-$HOME/.config}/meeting-blaster"

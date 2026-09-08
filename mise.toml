@@ -1,5 +1,6 @@
 [tools]
 go = "1.27.1"
+hk = "1.58.1"
 
 [env]
 CGO_ENABLED = "1"
@@ -33,15 +34,14 @@ run = [
   "test -z \"$(gofmt -l cmd internal)\" || { echo 'gofmt needed:'; gofmt -l cmd internal; exit 1; }",
 ]
 
+[tasks."hooks:install"]
+description = "Install local Git hooks for Go linting"
+run = "hk install --mise"
+
 [tasks.alert]
 description = "Show a sample full-screen alert without waiting for a meeting"
 depends = ["build"]
 run = "./bin/meeting-blaster --test-alert"
-
-[tasks.login]
-description = "Sign in to Google again"
-depends = ["build"]
-run = "./bin/meeting-blaster --login"
 
 [tasks.install]
 description = "Build and install into ~/.local (binary, icon, launcher entry)"

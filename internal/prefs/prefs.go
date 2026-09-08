@@ -121,14 +121,13 @@ func (w *Window) show(cfg config.Config) {
 
 	// --- calendars ------------------------------------------------------
 	// Loaded asynchronously: the window must open instantly even if the
-	// network is slow or the token needs refreshing.
+	// network is slow.
 	calendarBox := container.NewVBox(widget.NewLabel("Loading calendars…"))
+	calendarNames := make(map[string]string)
 	selected := make(map[string]bool, len(cfg.CalendarIDs))
 	for _, id := range cfg.CalendarIDs {
 		selected[id] = true
 	}
-
-	go w.loadCalendars(calendarBox, selected)
 
 	status := widget.NewLabel("")
 
@@ -145,10 +144,7 @@ func (w *Window) show(cfg config.Config) {
 		}
 		for _, src := range edited.ICSSources {
 			id := src.ID
-			name := src.Name
-			if name == "" {
-				name = src.URL
-			}
+			name := subscriptionLabel(src, calendarNames)
 			remove := widget.NewButton("Remove", func() {
 				for i := range edited.ICSSources {
 					if edited.ICSSources[i].ID == id {
@@ -167,7 +163,7 @@ func (w *Window) show(cfg config.Config) {
 		}
 	}
 
-	urlEntry := widget.NewEntry()
+	urlEntry := widget.NewPasswordEntry()
 	urlEntry.SetPlaceHolder("webcal://… , https://….ics or /path/to/calendar.ics")
 
 	addSource := widget.NewButton("Add", func() {
@@ -279,6 +275,13 @@ func (w *Window) show(cfg config.Config) {
 	)
 
 	redrawSources()
+	go w.loadCalendars(calendarBox, selected, func(cals []calendar.Calendar) {
+		for _, cal := range cals {
+			calendarNames[cal.ID] = cal.Name
+		}
+		redrawSources()
+		sourceBox.Refresh()
+	})
 
 	win.SetContent(content)
 	win.Show()
@@ -289,8 +292,8 @@ func (w *Window) show(cfg config.Config) {
 }
 
 // loadCalendars fetches the calendar list off the UI thread, then swaps the
-// placeholder for real checkboxes.
-func (w *Window) loadCalendars(box *fyne.Container, selected map[string]bool) {
+// placeholder for real checkboxes and supplies subscription names on the UI thread.
+func (w *Window) loadCalendars(box *fyne.Container, selected map[string]bool, onLoaded func([]calendar.Calendar)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -303,6 +306,7 @@ func (w *Window) loadCalendars(box *fyne.Container, selected map[string]bool) {
 			box.Refresh()
 			return
 		}
+		onLoaded(cals)
 		for _, cal := range cals {
 			id, name := cal.ID, cal.Name
 			if cal.Primary {
@@ -314,6 +318,16 @@ func (w *Window) loadCalendars(box *fyne.Container, selected map[string]bool) {
 		}
 		box.Refresh()
 	})
+}
+
+func subscriptionLabel(src config.ICSSource, calendarNames map[string]string) string {
+	if src.Name != "" {
+		return src.Name
+	}
+	if name := calendarNames[config.SourceICS+":"+src.ID]; name != "" {
+		return name
+	}
+	return "Calendar " + src.ID
 }
 
 func labelled(text string, w fyne.CanvasObject) fyne.CanvasObject {

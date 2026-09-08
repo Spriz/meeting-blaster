@@ -23,7 +23,7 @@ install -m 0644 "$repo_root/assets/icon.png"     "$ICON_DIR/meeting-blaster.png"
 install -m 0644 "$repo_root/packaging/meeting-blaster.desktop" \
                 "$APP_DIR/meeting-blaster.desktop"
 
-# Refresh the caches so the launcher entry and icon appear without a re-login.
+# Refresh the caches so the launcher entry and icon appear immediately.
 command -v update-desktop-database >/dev/null 2>&1 &&
   update-desktop-database "$APP_DIR" 2>/dev/null || true
 command -v gtk-update-icon-cache >/dev/null 2>&1 &&

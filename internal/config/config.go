@@ -1,7 +1,7 @@
 // Package config handles on-disk user settings.
 //
 // Settings live in a plain JSON file under the XDG config directory so they
-// can be edited by hand. Secrets never go here - see internal/tokens.
+// can be edited by hand.
 package config
 
 import (
@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// AppName is used for config/cache directory names and the keyring service.
+// AppName is used for config/cache directory names.
 const AppName = "meeting-blaster"
 
 // Config is the full set of user-tunable settings.
@@ -27,9 +27,7 @@ type Config struct {
 	CalendarIDs []string `json:"calendar_ids"`
 
 	// ICSSources are iCalendar subscriptions: webcal:// or https:// feed
-	// URLs, or paths to .ics files on disk. They need no account and no
-	// OAuth client, which is the only way to run without a Google API
-	// project.
+	// URLs, or paths to .ics files on disk.
 	ICSSources []ICSSource `json:"ics_sources"`
 
 	// AlertLead is how long before a meeting the full-screen overlay
@@ -86,12 +84,9 @@ type ICSSource struct {
 	Email string `json:"email,omitempty"`
 }
 
-// Calendar IDs are namespaced by their source so two providers cannot
-// collide: "google:me@example.com", "ics:9f2a1c0b".
-const (
-	SourceGoogle = "google"
-	SourceICS    = "ics"
-)
+// Calendar IDs are namespaced by their source so two subscriptions cannot
+// collide: "ics:9f2a1c0b".
+const SourceICS = "ics"
 
 // SourceID derives a stable identifier for a subscription from its
 // canonical URL. Deterministic, so re-adding a feed keeps its watch
@@ -99,6 +94,13 @@ const (
 func SourceID(canonicalURL string) string {
 	sum := sha256.Sum256([]byte(canonicalURL))
 	return hex.EncodeToString(sum[:4])
+}
+
+// isURLLike reports whether raw starts with a URI scheme. A Windows drive
+// letter and a colon in a directory name are filesystem paths, not URLs.
+func isURLLike(raw string) bool {
+	colon := strings.IndexByte(raw, ':')
+	return colon > 1 && !strings.ContainsAny(raw[:colon], `/\`)
 }
 
 // NormalizeCalendarURL canonicalises a subscription target: webcal:// is
@@ -111,10 +113,13 @@ func NormalizeCalendarURL(raw string) (string, error) {
 	}
 
 	unsupported := func() error {
-		return fmt.Errorf("unsupported calendar URL %q: expected webcal://, https:// or a path to a .ics file", raw)
+		return errors.New("unsupported calendar URL: expected webcal://, https:// or a path to a .ics file")
 	}
 
 	u, err := url.Parse(raw)
+	if err != nil && isURLLike(raw) {
+		return "", unsupported()
+	}
 	// A single-character scheme is a Windows drive letter: "C:\cal.ics"
 	// parses with Scheme == "c". Treating that as a URL scheme would make
 	// the feature unusable on Windows.
@@ -226,20 +231,8 @@ func (c Config) Watch(calendarID string) Config {
 	return c
 }
 
-// migrateCalendarIDs prefixes legacy, unnamespaced calendar IDs with the
-// Google source key. Before multi-source support every calendar came from
-// Google, so an existing watch selection would otherwise match nothing.
-func migrateCalendarIDs(ids []string) []string {
-	for i, id := range ids {
-		if strings.HasPrefix(id, SourceGoogle+":") || strings.HasPrefix(id, SourceICS+":") {
-			continue
-		}
-		ids[i] = SourceGoogle + ":" + id
-	}
-	return ids
-}
-
 // Dir is the directory holding config.json.
+
 func Dir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -279,7 +272,6 @@ func Load() (Config, error) {
 		return Default(), fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	cfg.CalendarIDs = migrateCalendarIDs(cfg.CalendarIDs)
 	cfg.ICSSources = normalizeSources(cfg.ICSSources)
 	return cfg, nil
 }

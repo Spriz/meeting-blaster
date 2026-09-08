@@ -151,7 +151,7 @@ func (p *Provider) partition(cal *ical.Calendar) ([]*ical.VEvent, overrideIndex,
 }
 
 // startOf reads DTSTART, interpreting a date-only value as local midnight
-// the way the Google provider does.
+// according to the RFC 5545 date-only convention.
 func startOf(ev *ical.VEvent, isAllDay bool) (time.Time, error) {
 	if isAllDay {
 		return ev.GetAllDayStartAt()

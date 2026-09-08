@@ -1,7 +1,6 @@
 // Package calendar defines the provider-agnostic calendar model.
 //
-// Nothing in this package may import a concrete provider. Google and ICS
-// live in sibling packages; new providers implement the same model.
+// Providers live in sibling packages and implement this shared model.
 package calendar
 
 import (
@@ -34,8 +33,8 @@ type Event struct {
 	// scanning free text (see internal/meetlink).
 	MeetingURL string
 
-	// Declined reports that the signed-in user responded "no". Declined
-	// events are kept so the UI can choose to hide them.
+	// Declined reports that the source marked the event as declined.
+	// Declined events are kept so the UI can choose to hide them.
 	Declined bool
 }
 
@@ -53,7 +52,7 @@ func (e Event) Upcoming(now time.Time) bool { return now.Before(e.Start) }
 // HasLink reports whether the event can be joined.
 func (e Event) HasLink() bool { return e.MeetingURL != "" }
 
-// Calendar is one selectable calendar within an account.
+// Calendar is one selectable calendar exposed by a provider.
 type Calendar struct {
 	ID      string
 	Name    string
@@ -66,7 +65,7 @@ type Provider interface {
 	// Name identifies the provider in logs and the settings UI.
 	Name() string
 
-	// Calendars lists the calendars the account can see.
+	// Calendars lists the calendars exposed by the source.
 	Calendars(ctx context.Context) ([]Calendar, error)
 
 	// Events returns events overlapping [from, to), expanding recurrences

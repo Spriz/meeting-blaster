@@ -1,10 +1,9 @@
 // Package ics implements calendar.Provider against iCalendar
 // subscriptions: webcal:// or https:// feed URLs, and .ics files on disk.
 //
-// This is the only way to run the app without a Google API project, so it
-// is deliberately forgiving: a feed that will not fetch, a timezone nobody
-// has heard of, or a property the spec does not mention must not stop the
-// other feeds from producing a meeting.
+// It is deliberately forgiving: a feed that will not fetch, a timezone
+// nobody has heard of, or a property the spec does not mention must not stop
+// the other feeds from producing a meeting.
 //
 // Authenticated feeds are out of scope. Every real-world subscription URL
 // carries its secret in the URL itself; anything needing an auth header is
@@ -16,10 +15,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"path"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -98,7 +93,7 @@ func (p *Provider) Calendars(ctx context.Context) ([]calendar.Calendar, error) {
 			name = results[i].cal.name
 		}
 		if name == "" {
-			name = labelFor(src.URL)
+			name = "Calendar " + src.ID
 		}
 		out = append(out, calendar.Calendar{ID: src.ID, Name: name})
 	}
@@ -170,17 +165,4 @@ func (p *Provider) loadAll(ctx context.Context, sources []Source) []result {
 	wg.Wait()
 
 	return results
-}
-
-// labelFor is a last-resort calendar name derived from the source location.
-// path.Base on a Windows path would return the whole string, so filesystem
-// paths go through filepath.Base.
-func labelFor(raw string) string {
-	if u, err := url.Parse(raw); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-		if base := path.Base(u.Path); base != "" && base != "." && base != "/" {
-			return strings.TrimSuffix(base, ".ics")
-		}
-		return u.Host
-	}
-	return strings.TrimSuffix(filepath.Base(raw), ".ics")
 }

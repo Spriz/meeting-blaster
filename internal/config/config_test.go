@@ -114,32 +114,6 @@ func isolateConfigDir(t *testing.T) string {
 	return path
 }
 
-func TestMigratesLegacyCalendarIDs(t *testing.T) {
-	path := isolateConfigDir(t)
-
-	// Before multi-source support every calendar came from Google, so an
-	// unprefixed ID in a saved config must still match after the change.
-	body := `{"calendar_ids": ["me@example.com", "ics:abc12345"]}`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	want := []string{"google:me@example.com", "ics:abc12345"}
-	if len(cfg.CalendarIDs) != len(want) {
-		t.Fatalf("got %v, want %v", cfg.CalendarIDs, want)
-	}
-	for i, w := range want {
-		if cfg.CalendarIDs[i] != w {
-			t.Errorf("calendar_ids[%d] = %q, want %q", i, cfg.CalendarIDs[i], w)
-		}
-	}
-}
-
 func TestLoadDerivesMissingSourceIDs(t *testing.T) {
 	path := isolateConfigDir(t)
 
@@ -171,7 +145,8 @@ func TestLoadNormalizesSourceURLs(t *testing.T) {
 	body := `{"ics_sources": [
 		{"url": "webcal://example.com/private-abc/basic.ics"},
 		{"id": "keepme", "url": "webcal://example.com/other.ics"},
-		{"url": "ftp://example.com/nope"}
+		{"url": "ftp://example.com/nope"},
+		{"url": "https://calendar.example/%zz-private-feed.ics"}
 	]}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -181,8 +156,8 @@ func TestLoadNormalizesSourceURLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load must not fail on an unusable source: %v", err)
 	}
-	if len(cfg.ICSSources) != 3 {
-		t.Fatalf("got %d sources, want all 3 kept", len(cfg.ICSSources))
+	if len(cfg.ICSSources) != 4 {
+		t.Fatalf("got %d sources, want all 4 kept", len(cfg.ICSSources))
 	}
 
 	if got, want := cfg.ICSSources[0].URL, "https://example.com/private-abc/basic.ics"; got != want {
@@ -203,6 +178,9 @@ func TestLoadNormalizesSourceURLs(t *testing.T) {
 
 	if got, want := cfg.ICSSources[2].URL, "ftp://example.com/nope"; got != want {
 		t.Errorf("URL[2] = %q, want the unusable URL kept verbatim", got)
+	}
+	if got, want := cfg.ICSSources[3].URL, "https://calendar.example/%zz-private-feed.ics"; got != want {
+		t.Errorf("URL[3] = %q, want malformed remote URL kept verbatim", got)
 	}
 }
 
@@ -254,9 +232,24 @@ func TestNormalizeCalendarURL(t *testing.T) {
 		}
 	})
 
-	t.Run("unsupported scheme is rejected", func(t *testing.T) {
-		if _, err := NormalizeCalendarURL("ftp://host/c"); err == nil {
-			t.Error("expected an error for ftp://")
+	t.Run("unsupported scheme errors do not echo the URL", func(t *testing.T) {
+		_, err := NormalizeCalendarURL("ftp://host/private-calendar-token")
+		if err == nil {
+			t.Fatal("expected an error for ftp://")
+		}
+		if strings.Contains(err.Error(), "private-calendar-token") {
+			t.Errorf("error leaked the subscription URL: %v", err)
+		}
+	})
+
+	t.Run("malformed remote URL is rejected without leaking it", func(t *testing.T) {
+		const feed = "https://calendar.example/%zz-private-feed.ics"
+		_, err := NormalizeCalendarURL(feed)
+		if err == nil {
+			t.Fatal("expected malformed remote URL to be rejected")
+		}
+		if strings.Contains(err.Error(), "zz-private-feed") {
+			t.Errorf("error leaked the subscription URL: %v", err)
 		}
 	})
 
@@ -284,7 +277,7 @@ func TestWatchAddsOnlyToANarrowedSelection(t *testing.T) {
 	})
 
 	t.Run("narrowed selection gains the new calendar", func(t *testing.T) {
-		cfg := Config{CalendarIDs: []string{"google:work"}}.Watch("ics:abc12345")
+		cfg := Config{CalendarIDs: []string{"ics:work"}}.Watch("ics:abc12345")
 		if len(cfg.CalendarIDs) != 2 || cfg.CalendarIDs[1] != "ics:abc12345" {
 			t.Errorf("got %v, want the ID appended", cfg.CalendarIDs)
 		}
@@ -301,7 +294,7 @@ func TestWatchAddsOnlyToANarrowedSelection(t *testing.T) {
 		// A bare append into spare capacity would make the second call
 		// overwrite the first call's result.
 		ids := make([]string, 1, 4)
-		ids[0] = "google:work"
+		ids[0] = "ics:work"
 		base := Config{CalendarIDs: ids}
 
 		a := base.Watch("ics:aaaaaaaa")

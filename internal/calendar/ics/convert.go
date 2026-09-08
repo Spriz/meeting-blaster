@@ -188,8 +188,8 @@ func parseICalDuration(s string) (time.Duration, error) {
 	return sign * total, nil
 }
 
-// joinURL prefers structured conference data, exactly as the Google
-// provider does, and falls back to scanning free text.
+// joinURL prefers structured conference data, then scans free text for a
+// meeting link.
 func joinURL(ev *ical.VEvent) string {
 	confs := ev.GetProperties(propConference)
 	for _, p := range confs {

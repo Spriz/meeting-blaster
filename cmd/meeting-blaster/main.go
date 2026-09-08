@@ -19,7 +19,6 @@ import (
 
 	"github.com/spriz/meeting-blaster/internal/browser"
 	"github.com/spriz/meeting-blaster/internal/calendar"
-	"github.com/spriz/meeting-blaster/internal/calendar/google"
 	"github.com/spriz/meeting-blaster/internal/calendar/ics"
 	"github.com/spriz/meeting-blaster/internal/calendar/multi"
 	"github.com/spriz/meeting-blaster/internal/config"
@@ -29,7 +28,6 @@ import (
 	"github.com/spriz/meeting-blaster/internal/prefs"
 	"github.com/spriz/meeting-blaster/internal/screens"
 	"github.com/spriz/meeting-blaster/internal/singleton"
-	"github.com/spriz/meeting-blaster/internal/tokens"
 	"github.com/spriz/meeting-blaster/internal/tray"
 )
 
@@ -41,8 +39,6 @@ var version = "dev"
 
 func main() {
 	var (
-		login       = flag.Bool("login", false, "sign in to Google again, replacing any stored token")
-		logout      = flag.Bool("logout", false, "forget the stored Google token and exit; iCalendar subscriptions are unaffected")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		verbose     = flag.Bool("v", false, "log at debug level")
 		testAlert   = flag.Bool("test-alert", false, "show a sample full-screen alert and exit")
@@ -79,7 +75,7 @@ func main() {
 		return
 	}
 
-	if err := run(log, *login, *logout, *testAlert); err != nil {
+	if err := run(log, *testAlert); err != nil {
 		// Setup guidance has already been printed in full; repeating it
 		// as a one-line error adds noise and no information.
 		if !errors.Is(err, errSetupPrinted) {
@@ -89,17 +85,7 @@ func main() {
 	}
 }
 
-func run(log *slog.Logger, login, logout, testAlert bool) error {
-	store := tokens.Store{}
-
-	if logout {
-		if err := store.Delete(google.Account); err != nil {
-			return err
-		}
-		fmt.Println("Signed out. Run meeting-blaster again to sign back in.")
-		return nil
-	}
-
+func run(log *slog.Logger, testAlert bool) error {
 	// A second copy would mean two tray icons and two full-screen alerts,
 	// which is worse than none.
 	release, err := singleton.Acquire()
@@ -121,55 +107,29 @@ func run(log *slog.Logger, login, logout, testAlert bool) error {
 		cfg = config.Default()
 	}
 
+	if testAlert {
+		ui := fyneapp.NewWithID(appID)
+		overlays := overlay.New(ui, log)
+		return runTestAlert(ui, overlays, cfg)
+	}
+
+	var sources []multi.Source
+	icsProvider := ics.New(icsSources(cfg), log)
+	if len(cfg.ICSSources) > 0 {
+		sources = append(sources, multi.Source{Key: config.SourceICS, Provider: icsProvider})
+	}
+	if len(sources) == 0 {
+		return setupInstructions()
+	}
+	provider := multi.New(log, sources...)
+
 	// The Fyne app must be created on the main goroutine, before anything
 	// tries to show a window.
 	ui := fyneapp.NewWithID(appID)
 	overlays := overlay.New(ui, log)
 
-	if testAlert {
-		return runTestAlert(ui, overlays, cfg)
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-
-	var sources []multi.Source
-
-	// Constructed unconditionally so the preferences callback below needs
-	// no nil check; only added as a source once a subscription exists.
-	icsProvider := ics.New(icsSources(cfg), log)
-	if len(cfg.ICSSources) > 0 {
-		sources = append(sources, multi.Source{Key: config.SourceICS, Provider: icsProvider})
-	}
-
-	creds, err := google.LoadCredentials()
-	switch {
-	case errors.Is(err, google.ErrNoCredentials):
-		if len(sources) == 0 {
-			return setupInstructions()
-		}
-	case err != nil:
-		return err
-	default:
-		// Signing in interactively is only acceptable when it is the
-		// only way to get any calendar at all; a user who ran --logout
-		// and switched to subscriptions must not be dragged back to a
-		// browser on every start.
-		if login || len(sources) == 0 || hasToken(store) {
-			if err := ensureSignedIn(ctx, creds, store, cfg, login, log); err != nil {
-				return err
-			}
-			gp, err := google.New(ctx, creds, store)
-			if err != nil {
-				return fmt.Errorf("connect to Google Calendar: %w", err)
-			}
-			sources = append(sources, multi.Source{Key: config.SourceGoogle, Provider: gp})
-		} else {
-			log.Info("Google sign-in skipped; run with --login to enable it")
-		}
-	}
-
-	provider := multi.New(log, sources...)
 
 	var eng *engine.Engine
 
@@ -245,36 +205,6 @@ func run(log *slog.Logger, login, logout, testAlert bool) error {
 	return nil
 }
 
-// ensureSignedIn runs the OAuth flow when there is no usable stored token,
-// or when the user explicitly asked to sign in again.
-func ensureSignedIn(ctx context.Context, creds google.Credentials, store tokens.Store, cfg config.Config, force bool, log *slog.Logger) error {
-	if !force {
-		if _, err := store.Load(google.Account); err == nil {
-			return nil
-		} else if !errors.Is(err, tokens.ErrNotFound) {
-			return err
-		}
-	}
-
-	fmt.Println("Opening your browser to sign in to Google…")
-	tok, err := google.Authorize(ctx, creds, cfg.JoinBrowser)
-	if err != nil {
-		return fmt.Errorf("sign in: %w", err)
-	}
-	if err := store.Save(google.Account, tok); err != nil {
-		return fmt.Errorf("save token: %w", err)
-	}
-	log.Info("signed in to Google")
-	return nil
-}
-
-// hasToken reports whether a Google session is already stored, which is
-// what distinguishes "signed in previously" from "never signed in".
-func hasToken(store tokens.Store) bool {
-	_, err := store.Load(google.Account)
-	return err == nil
-}
-
 // icsSources maps the saved subscriptions onto the provider's own type.
 func icsSources(cfg config.Config) []ics.Source {
 	out := make([]ics.Source, 0, len(cfg.ICSSources))
@@ -289,12 +219,11 @@ func icsSources(cfg config.Config) []ics.Source {
 	return out
 }
 
-// addICSSource appends a subscription to the saved config, so a user with
-// no Google account can get started without hand-editing JSON.
+// addICSSource appends a subscription to the saved config.
 func addICSSource(raw string) error {
 	url, err := config.NormalizeCalendarURL(raw)
 	if err != nil {
-		return err
+		return errors.New("invalid calendar subscription: expected webcal://, https://, or a path to a .ics file")
 	}
 	id := config.SourceID(url)
 
@@ -304,7 +233,7 @@ func addICSSource(raw string) error {
 	}
 	for _, src := range cfg.ICSSources {
 		if src.ID == id {
-			return fmt.Errorf("already subscribed to %s", url)
+			return fmt.Errorf("already subscribed to %s", calendarLabel(src))
 		}
 	}
 
@@ -314,8 +243,15 @@ func addICSSource(raw string) error {
 		return err
 	}
 
-	fmt.Printf("Subscribed to %s. Restart meeting-blaster to pick it up.\n", url)
+	fmt.Printf("Subscribed to %s. Restart meeting-blaster to pick it up.\n", calendarLabel(config.ICSSource{ID: id, URL: url}))
 	return nil
+}
+
+func calendarLabel(src config.ICSSource) string {
+	if src.Name != "" {
+		return src.Name
+	}
+	return "iCalendar subscription"
 }
 
 // runTestAlert shows a sample overlay so the alert can be checked without
@@ -364,44 +300,31 @@ func printMonitors() error {
 	return nil
 }
 
-// setupInstructions explains how to get a calendar in, leading with the
-// subscription route because it is the only zero-setup option.
+// setupInstructions explains how to add an iCalendar subscription.
 func setupInstructions() error {
-	path, _ := google.CredentialsPath()
-	fmt.Fprintf(os.Stderr, `meeting-blaster has no calendar configured yet.
+	fmt.Fprint(os.Stderr, `meeting-blaster has no calendar configured yet.
 
-The quickest way in is to subscribe to an iCalendar feed. No account, no
-API project:
+Subscribe to an iCalendar feed. No account is needed:
 
   meeting-blaster --add-calendar "webcal://example.com/your-calendar.ics"
+  meeting-blaster --add-calendar "https://example.com/your-calendar.ics"
 
 Most calendar services publish a private feed URL:
   Google Calendar  Settings -> your calendar -> "Secret address in iCal format"
   Outlook / M365   Settings -> Calendar -> Shared calendars -> Publish
   Nextcloud        Calendar -> ... -> Copy subscription link
+
+For a local calendar file, pass its path instead:
+  meeting-blaster --add-calendar "/path/to/calendar.ics"
+
 Published feeds are refreshed by the provider on its own schedule, often
 only every few hours, so a meeting added this morning may not appear today.
 
-For live data, connect Google Calendar directly instead. That needs a
-one-time Google OAuth client, which stays on your machine:
-
-  1. Open https://console.cloud.google.com/projectcreate and create a project.
-  2. Enable the Google Calendar API for it:
-     https://console.cloud.google.com/apis/library/calendar-json.googleapis.com
-  3. Configure the OAuth consent screen as "External", and add yourself
-     under "Test users".
-  4. Under "Credentials", create an OAuth client ID of type "Desktop app".
-  5. Download the JSON and save it as:
-       %s
-
 Then run meeting-blaster again.
-
-Alternatively, set MEETING_BLASTER_GOOGLE_CLIENT_ID and
-MEETING_BLASTER_GOOGLE_CLIENT_SECRET in the environment.
-`, path)
+`)
 	return errSetupPrinted
 }
 
 // errSetupPrinted signals that setup guidance was written to stderr, so the
 // caller should exit non-zero without logging anything further.
-var errSetupPrinted = errors.New("no Google OAuth credentials configured")
+var errSetupPrinted = errors.New("no calendar configured")
