@@ -226,6 +226,12 @@ func run(log *slog.Logger, login, logout, testAlert bool) error {
 	startTray, stopTray := systray.RunWithExternalLoop(trayUI.Ready, func() {})
 	startTray()
 
+	// Fyne quits when its last window closes. Our external systray does
+	// not count, so retain a never-shown window for the background app.
+	// Alerts and preferences can then close normally; Quit still stops
+	// the loop explicitly. Keep this out of the one-shot --test-alert path.
+	ui.NewWindow("meeting-blaster background")
+
 	// Quitting from the tray cancels ctx; translate that into stopping the
 	// Fyne loop, which is what actually ends the process.
 	go func() {

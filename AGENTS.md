@@ -73,11 +73,13 @@ Fyne must go through `fyne.Do`. `overlay` and `prefs` already wrap their own
 public methods, so they are safe to call from anywhere; new UI code must do
 the same.
 
-`ui.Run()` keeps running with zero windows open on Linux, so no hidden
-keep-alive window is needed. Note that Fyne's macOS driver does *not* behave
-this way: there, `ui.Run()` returns once the last window closes, so the
-process exits after the first overlay auto-dismiss. Unfixed, along with the
-rest of macOS support.
+Fyne quits when its last window closes, including on Linux. Our externally
+managed systray does not count as a Fyne window, so normal startup retains a
+never-shown window to keep the event loop alive after alerts and preferences
+close. It has no native window until shown; do not show or close it during
+normal operation. Tray Quit and termination signals explicitly call
+`ui.Quit()`. The one-shot `--test-alert` path deliberately has no keep-alive
+window, so dismissing its overlay still exits.
 
 `tray.Update` runs on the engine goroutine while `tray.Ready` runs on
 systray's, so the menu items are published behind a mutex-guarded `ready`
