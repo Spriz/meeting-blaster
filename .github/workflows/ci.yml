@@ -24,6 +24,8 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          # Select published releases instead of racing the CDN version update.
+          minimum_release_age: 24h
           cache: true
 
       - name: Verify formatting
@@ -55,7 +57,10 @@ jobs:
       CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v4
+
+      # mise is skipped here: the Go version already lives in go.mod, and
+      # mise.toml's GOFLAGS=-tags=x11 only picks GLFW's Linux backend.
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
