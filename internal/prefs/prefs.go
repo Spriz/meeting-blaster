@@ -76,6 +76,26 @@ func (w *Window) show(cfg config.Config) {
 	timeoutEntry := widget.NewEntry()
 	timeoutEntry.SetText(strconv.Itoa(int(cfg.OverlayTimeout.Std().Seconds())))
 
+	// Which displays the alert blocks. Labels are phrased around intent
+	// rather than the stored values.
+	monitorLabels := map[string]string{
+		config.MonitorsPrimary: "Primary display only",
+		config.MonitorsAll:     "Every display",
+		config.MonitorsActive:  "Wherever the window opens",
+	}
+	monitorValues := map[string]string{}
+	var monitorOptions []string
+	for _, mode := range config.ValidMonitorModes {
+		monitorOptions = append(monitorOptions, monitorLabels[mode])
+		monitorValues[monitorLabels[mode]] = mode
+	}
+	monitorChoice := widget.NewRadioGroup(monitorOptions, func(choice string) {
+		if mode, ok := monitorValues[choice]; ok {
+			edited.OverlayMonitors = mode
+		}
+	})
+	monitorChoice.SetSelected(monitorLabels[cfg.MonitorMode()])
+
 	// --- display --------------------------------------------------------
 	clock := widget.NewRadioGroup([]string{"24-hour", "12-hour"}, func(choice string) {
 		edited.Use24Hour = choice == "24-hour"
@@ -157,6 +177,8 @@ func (w *Window) show(cfg config.Config) {
 		labelled("Full-screen alert (minutes before)", alertEntry),
 		labelled("Notification (minutes before, 0 = off)", notifyEntry),
 		labelled("Auto-dismiss overlay after (seconds, 0 = never)", timeoutEntry),
+		widget.NewLabel("Block which displays:"),
+		monitorChoice,
 		widget.NewSeparator(),
 
 		widget.NewLabelWithStyle("Display", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),

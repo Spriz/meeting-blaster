@@ -1,0 +1,53 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please never paste the contents of `credentials.json` or an OAuth
+        token into an issue.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and desktop environment
+      placeholder: Ubuntu 24.04, GNOME 46
+    validations:
+      required: true
+
+  - type: dropdown
+    id: session
+    attributes:
+      label: Display server
+      options: [Wayland, X11, "Not sure"]
+    validations:
+      required: true
+
+  - type: input
+    id: monitors
+    attributes:
+      label: Monitor setup
+      description: Output of `meeting-blaster --list-monitors`, if the problem involves the alert.
+      placeholder: single 1920x1080
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output of `meeting-blaster -v`
+      render: shell

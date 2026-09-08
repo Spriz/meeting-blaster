@@ -5,13 +5,14 @@
 // the time remaining in type you can read from across the room, and offers a
 // single obvious action.
 //
-// Fyne owns the main thread. Every method here is safe to call from any
-// goroutine; each marshals onto the UI thread with fyne.Do.
+// Fyne owns the main thread. Every exported method here is safe to call from
+// any goroutine; each marshals onto the UI thread with fyne.Do.
 package overlay
 
 import (
 	"fmt"
 	"image/color"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -22,10 +23,16 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/spriz/meeting-blaster/internal/calendar"
+	"github.com/spriz/meeting-blaster/internal/config"
+	"github.com/spriz/meeting-blaster/internal/screens"
 )
 
-// Palette is deliberately high-contrast: this window has one job, which is
-// to be noticed.
+// windowTitle is also how the window is located in the X11 tree in order to
+// pin it to a monitor, so it must stay stable.
+const windowTitle = "Meeting starting"
+
+// The palette is deliberately high-contrast: this window has one job, which
+// is to be noticed.
 var (
 	colorBackground = color.NRGBA{R: 0x0d, G: 0x0d, B: 0x12, A: 0xff}
 	colorUrgent     = color.NRGBA{R: 0xff, G: 0x53, B: 0x69, A: 0xff}
@@ -43,30 +50,40 @@ type Options struct {
 	// TimeLayout formats the meeting's start and end times.
 	TimeLayout string
 
-	// OnJoin is called when the user clicks Join. It receives the event so
-	// the caller can open the link with its own browser settings.
+	// Monitors is a config.Monitors* value selecting which displays the
+	// alert covers.
+	Monitors string
+
+	// OnJoin is called when the user chooses to join.
 	OnJoin func(calendar.Event)
 }
 
 // Controller shows alerts on a Fyne app. Construct one and reuse it.
 type Controller struct {
 	app fyne.App
+	log *slog.Logger
 
 	mu      sync.Mutex
-	current fyne.Window
+	windows []*alertUI
 	stop    chan struct{}
 }
 
 // New returns a Controller drawing on the given app.
-func New(app fyne.App) *Controller { return &Controller{app: app} }
+func New(app fyne.App, log *slog.Logger) *Controller {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Controller{app: app, log: log}
+}
 
-// Show raises a full-screen alert for ev, replacing any alert already up.
-// Safe to call from any goroutine.
+// Show raises the alert for ev, replacing any alert already up. Safe to call
+// from any goroutine.
 func (c *Controller) Show(ev calendar.Event, opts Options) {
 	fyne.Do(func() { c.show(ev, opts) })
 }
 
-// Dismiss closes the current alert, if any. Safe to call from any goroutine.
+// Dismiss closes the current alert on every display. Safe to call from any
+// goroutine.
 func (c *Controller) Dismiss() {
 	fyne.Do(func() { c.close() })
 }
@@ -78,15 +95,77 @@ func (c *Controller) show(ev calendar.Event, opts Options) {
 		opts.TimeLayout = "15:04"
 	}
 
-	win := c.app.NewWindow("Meeting starting")
-	win.SetFullScreen(true)
-	win.SetPadded(false)
-
+	targets := c.targets(opts.Monitors)
 	stop := make(chan struct{})
 
+	var built []*alertUI
+	for _, target := range targets {
+		ui := c.buildWindow(ev, opts, target)
+		if ui != nil {
+			built = append(built, ui)
+		}
+	}
+
 	c.mu.Lock()
-	c.current, c.stop = win, stop
+	c.windows, c.stop = built, stop
 	c.mu.Unlock()
+
+	go c.runCountdown(ev, built, stop, opts.Timeout)
+}
+
+// target is one display to cover. A nil monitor means "wherever the window
+// manager puts it", which is the fallback when enumeration is unavailable.
+type target struct {
+	monitor *screens.Monitor
+}
+
+// targets resolves the configured mode into the displays to cover. Any
+// failure degrades to a single window placed by the window manager, because
+// an alert in the wrong place still beats no alert.
+func (c *Controller) targets(mode string) []target {
+	switch mode {
+	case config.MonitorsActive:
+		return []target{{}}
+
+	case config.MonitorsAll:
+		monitors, err := screens.List()
+		if err != nil || len(monitors) == 0 {
+			c.log.Debug("cannot enumerate monitors, using one window", "error", err)
+			return []target{{}}
+		}
+		out := make([]target, 0, len(monitors))
+		for i := range monitors {
+			out = append(out, target{monitor: &monitors[i]})
+		}
+		return out
+
+	default: // config.MonitorsPrimary
+		monitor, err := screens.Primary()
+		if err != nil {
+			c.log.Debug("cannot find primary monitor, using one window", "error", err)
+			return []target{{}}
+		}
+		return []target{{monitor: &monitor}}
+	}
+}
+
+// buildWindow creates, shows, and pins one alert window.
+func (c *Controller) buildWindow(ev calendar.Event, opts Options, t target) *alertUI {
+	// Note which windows already carry our title, so the one created below
+	// can be told apart from alerts already on other displays.
+	var existing map[uint32]bool
+	if t.monitor != nil {
+		existing = make(map[uint32]bool)
+		if ids, err := screens.Find(windowTitle); err == nil {
+			for _, id := range ids {
+				existing[id] = true
+			}
+		}
+	}
+
+	win := c.app.NewWindow(windowTitle)
+	win.SetFullScreen(true)
+	win.SetPadded(false)
 
 	background := canvas.NewRectangle(colorBackground)
 
@@ -144,7 +223,6 @@ func (c *Controller) show(ev calendar.Event, opts Options) {
 
 	win.SetContent(container.NewStack(background, container.NewCenter(content)))
 
-	// Escape is the muscle-memory dismissal for a full-screen window.
 	win.Canvas().SetOnTypedKey(func(key *fyne.KeyEvent) {
 		switch key.Name {
 		case fyne.KeyEscape:
@@ -157,30 +235,60 @@ func (c *Controller) show(ev calendar.Event, opts Options) {
 		}
 	})
 
-	win.SetOnClosed(func() {
-		c.mu.Lock()
-		if c.current == win {
-			c.current, c.stop = nil, nil
-		}
-		c.mu.Unlock()
-		safeClose(stop)
-	})
+	// Closing any one window dismisses the whole alert, so the displays do
+	// not get out of step.
+	win.SetOnClosed(func() { c.Dismiss() })
 
 	win.Show()
 	win.RequestFocus()
 
-	ui := &alertUI{win: win, kicker: kicker, title: title, countdown: countdown, subtitle: subtitle}
+	ui := &alertUI{
+		win: win, kicker: kicker, title: title,
+		countdown: countdown, subtitle: subtitle,
+		monitor: t.monitor,
+	}
 
-	// The canvas reports its real size only once the window is mapped, so
-	// the first measurement happens just after Show rather than before it.
-	fyne.Do(func() { c.applyScale(ui) })
+	c.pin(ui, existing)
 
-	go c.runCountdown(ev, ui, stop, opts.Timeout)
+	// The canvas reports its real size only once the window is mapped, and
+	// buildWindow already runs on the UI thread, so this waits a frame and
+	// then marshals back rather than measuring a zero-sized canvas.
+	time.AfterFunc(50*time.Millisecond, func() {
+		fyne.Do(func() { c.applyScale(ui) })
+	})
+	return ui
 }
 
-// runCountdown updates the big number once a second until the alert is
-// dismissed or times out. It runs off the UI thread and marshals each update.
-func (c *Controller) runCountdown(ev calendar.Event, ui *alertUI, stop <-chan struct{}, timeout time.Duration) {
+// pin moves the newly created window onto its monitor. The window manager
+// owns the geometry of fullscreen windows, so this goes through the EWMH
+// message meant for the purpose rather than setting coordinates.
+func (c *Controller) pin(ui *alertUI, existing map[uint32]bool) {
+	if ui.monitor == nil {
+		return
+	}
+
+	ids, err := screens.Find(windowTitle)
+	if err != nil {
+		c.log.Debug("cannot locate alert window to pin", "error", err)
+		return
+	}
+	for _, id := range ids {
+		if existing[id] {
+			continue
+		}
+		if err := screens.PinFullscreen(id, *ui.monitor); err != nil {
+			c.log.Debug("cannot pin alert window", "monitor", ui.monitor.Name, "error", err)
+			return
+		}
+		ui.windowID = id
+		c.log.Debug("alert pinned", "monitor", ui.monitor.Name, "window", id)
+		return
+	}
+}
+
+// runCountdown updates the big number on every display once a second, until
+// the alert is dismissed or times out.
+func (c *Controller) runCountdown(ev calendar.Event, uis []*alertUI, stop <-chan struct{}, timeout time.Duration) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -207,11 +315,11 @@ func (c *Controller) runCountdown(ev calendar.Event, ui *alertUI, stop <-chan st
 			}
 			label := countdownText(ev, now)
 			fyne.Do(func() {
-				ui.countdown.Text = label
-				ui.countdown.Refresh()
-				// Re-check in case the window landed on a different
-				// monitor, or the size was not final on the first frame.
-				c.applyScale(ui)
+				for _, ui := range uis {
+					ui.countdown.Text = label
+					ui.countdown.Refresh()
+					c.applyScale(ui)
+				}
 			})
 		}
 	}
@@ -219,21 +327,21 @@ func (c *Controller) runCountdown(ev calendar.Event, ui *alertUI, stop <-chan st
 
 func (c *Controller) close() {
 	c.mu.Lock()
-	win, stop := c.current, c.stop
-	c.current, c.stop = nil, nil
+	windows, stop := c.windows, c.stop
+	c.windows, c.stop = nil, nil
 	c.mu.Unlock()
 
 	if stop != nil {
 		safeClose(stop)
 	}
-	if win != nil {
-		win.SetOnClosed(nil)
-		win.Close()
+	for _, ui := range windows {
+		ui.win.SetOnClosed(nil)
+		ui.win.Close()
 	}
 }
 
-// countdownText renders the time remaining, switching to a "now" message
-// once the meeting has actually begun.
+// countdownText renders the time remaining, switching to a "now" message once
+// the meeting has actually begun.
 func countdownText(ev calendar.Event, now time.Time) string {
 	remaining := ev.Start.Sub(now).Round(time.Second)
 	if remaining <= 0 {
@@ -261,13 +369,16 @@ func safeClose(ch chan struct{}) {
 	close(ch)
 }
 
-// alertUI groups the text nodes whose size depends on the display.
+// alertUI groups one window's text nodes, whose size depends on the display.
 type alertUI struct {
 	win       fyne.Window
 	kicker    *canvas.Text
 	title     *canvas.Text
 	countdown *canvas.Text
 	subtitle  *canvas.Text
+
+	monitor  *screens.Monitor
+	windowID uint32
 
 	lastHeight float32
 }

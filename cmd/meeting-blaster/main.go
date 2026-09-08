@@ -25,6 +25,7 @@ import (
 	"github.com/spriz/meeting-blaster/internal/notify"
 	"github.com/spriz/meeting-blaster/internal/overlay"
 	"github.com/spriz/meeting-blaster/internal/prefs"
+	"github.com/spriz/meeting-blaster/internal/screens"
 	"github.com/spriz/meeting-blaster/internal/tokens"
 	"github.com/spriz/meeting-blaster/internal/tray"
 )
@@ -42,6 +43,7 @@ func main() {
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		verbose     = flag.Bool("v", false, "log at debug level")
 		testAlert   = flag.Bool("test-alert", false, "show a sample full-screen alert and exit")
+		listScreens = flag.Bool("list-monitors", false, "list connected monitors and exit")
 	)
 	flag.Parse()
 
@@ -56,6 +58,14 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
+
+	if *listScreens {
+		if err := printMonitors(); err != nil {
+			log.Error("cannot list monitors", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(log, *login, *logout, *testAlert); err != nil {
 		// Setup guidance has already been printed in full; repeating it
@@ -89,7 +99,7 @@ func run(log *slog.Logger, login, logout, testAlert bool) error {
 	// The Fyne app must be created on the main goroutine, before anything
 	// tries to show a window.
 	ui := fyneapp.NewWithID(appID)
-	overlays := overlay.New(ui)
+	overlays := overlay.New(ui, log)
 
 	if testAlert {
 		return runTestAlert(ui, overlays, cfg)
@@ -149,6 +159,7 @@ func run(log *slog.Logger, login, logout, testAlert bool) error {
 			overlays.Show(ev, overlay.Options{
 				Timeout:    eng.Config().OverlayTimeout.Std(),
 				TimeLayout: eng.Config().TimeLayout(),
+				Monitors:   eng.Config().MonitorMode(),
 				OnJoin:     openMeeting,
 			})
 		},
@@ -216,10 +227,36 @@ func runTestAlert(ui fyne.App, overlays *overlay.Controller, cfg config.Config) 
 		time.Sleep(200 * time.Millisecond)
 		overlays.Show(sample, overlay.Options{
 			TimeLayout: cfg.TimeLayout(),
+			Monitors:   cfg.MonitorMode(),
 			OnJoin:     func(calendar.Event) {},
 		})
 	}()
 	ui.Run()
+	return nil
+}
+
+// printMonitors lists the displays, so a user can see what the
+// overlay_monitors setting will act on.
+func printMonitors() error {
+	monitors, err := screens.List()
+	if err != nil {
+		return err
+	}
+	if len(monitors) == 0 {
+		fmt.Println("No monitors detected.")
+		return nil
+	}
+	fmt.Printf("%-4s %-12s %-20s %s\n", "IDX", "NAME", "GEOMETRY", "")
+	for _, m := range monitors {
+		note := ""
+		if m.Primary {
+			note = "primary"
+		}
+		fmt.Printf("%-4d %-12s %-20s %s\n", m.Index, m.Name,
+			fmt.Sprintf("%dx%d+%d+%d", m.Width, m.Height, m.X, m.Y), note)
+	}
+	fmt.Println()
+	fmt.Println(`Set "overlay_monitors" in config.json to "primary", "all", or "active".`)
 	return nil
 }
 

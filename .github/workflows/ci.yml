@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Fyne renders through GLFW, which needs the X11 development headers.
+      - name: Install X11 headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorg-dev
+
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build
+        run: go build ./...
+
+  cross-compile:
+    name: Vet portable packages for ${{ matrix.goos }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [darwin, windows]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
+
+      # The GUI packages need a CGO toolchain per platform, which this job
+      # does not have. Vetting the portable packages still catches the common
+      # breakage: a build-tagged file that stops compiling for its own GOOS.
+      - name: Vet non-GUI packages
+        env:
+          GOOS: ${{ matrix.goos }}
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./internal/browser/ ./internal/notify/ ./internal/meetlink/ \
+                 ./internal/engine/ ./internal/config/ ./internal/calendar/...

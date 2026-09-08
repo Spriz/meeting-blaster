@@ -32,7 +32,8 @@ A minute before the meeting, the whole screen goes to this:
 
 - Next meeting and a live countdown in the tray
 - Today's remaining agenda in the menu, click any entry to join
-- Full-screen alert you cannot miss, with one-click join
+- Full-screen alert you cannot miss, with one-click join — on the primary
+  display, on every display at once, or wherever focus happens to be
 - Desktop notification at a separate, earlier lead time
 - Join links detected for Meet, Zoom, Teams, Webex, Whereby, Jitsi, GoTo,
   BlueJeans, Chime, Around, Discord and Slack huddles
@@ -75,6 +76,7 @@ requested; the app never writes to your calendar.
 ```sh
 meeting-blaster                # run it
 meeting-blaster --test-alert   # preview the full-screen alert
+meeting-blaster --list-monitors # show connected displays
 meeting-blaster --login        # sign in again
 meeting-blaster --logout       # forget the stored token
 meeting-blaster -v             # debug logging
@@ -88,12 +90,36 @@ Settings live in `~/.config/meeting-blaster/config.json` and are editable from
 | `alert_lead` | `1m` | how long before a meeting the full-screen alert fires |
 | `notify_lead` | `5m` | desktop notification lead time; `0` disables |
 | `overlay_timeout` | `0s` | auto-dismiss the overlay; `0` means never |
+| `overlay_monitors` | `primary` | which displays the alert blocks: `primary`, `all`, or `active` |
 | `poll_interval` | `2m` | how often the calendar is refetched |
 | `calendar_ids` | `[]` | which calendars to watch; empty means all |
 | `use_24_hour` | `true` | clock format |
 | `title_max_len` | `30` | truncation for the tray label |
 | `hide_declined` | `true` | skip meetings you declined |
 | `join_browser` | `""` | override the browser for join links |
+
+## Which screens the alert blocks
+
+`overlay_monitors` decides where the alert appears:
+
+| Value | Behaviour |
+| --- | --- |
+| `primary` | Always the primary display. Predictable — the alert is always in the same place. (default) |
+| `all` | Every connected display, one window each. The hardest to ignore. |
+| `active` | Wherever the window manager opens it, which is usually the focused display. |
+
+`meeting-blaster --list-monitors` shows what is connected:
+
+```
+IDX  NAME         GEOMETRY
+0    DP-3         3840x2160+2560+0     primary
+1    DP-2         2560x1440+6400+336
+2    HDMI-1       2560x1440+0+256
+```
+
+Monitor targeting is implemented for X11 (including XWayland). Elsewhere the
+alert still appears, but always as a single window placed by the window
+manager, as though `active` were set.
 
 ## Platform support
 

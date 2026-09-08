@@ -52,18 +52,55 @@ type Config struct {
 	// JoinBrowser overrides the browser used for join links. Empty uses
 	// the system default handler.
 	JoinBrowser string `json:"join_browser"`
+
+	// OverlayMonitors selects which displays the full-screen alert covers:
+	// MonitorsPrimary, MonitorsAll, or MonitorsActive.
+	OverlayMonitors string `json:"overlay_monitors"`
+}
+
+// Values for Config.OverlayMonitors.
+const (
+	// MonitorsPrimary always blocks the primary display, wherever the
+	// pointer happens to be. Predictable: the alert is always in the same
+	// place.
+	MonitorsPrimary = "primary"
+
+	// MonitorsAll blocks every connected display, with one window each.
+	// The hardest to ignore, and the point of the app.
+	MonitorsAll = "all"
+
+	// MonitorsActive leaves placement to the window manager, which
+	// generally means the display with focus. This is the only mode that
+	// works when monitor enumeration is unavailable.
+	MonitorsActive = "active"
+)
+
+// ValidMonitorModes lists the accepted OverlayMonitors values.
+var ValidMonitorModes = []string{MonitorsPrimary, MonitorsAll, MonitorsActive}
+
+// MonitorMode returns OverlayMonitors, falling back to MonitorsPrimary when
+// it is unset or unrecognised, so a hand-edited typo cannot stop the alert
+// from appearing.
+func (c Config) MonitorMode() string {
+	for _, mode := range ValidMonitorModes {
+		if c.OverlayMonitors == mode {
+			return mode
+		}
+	}
+	return MonitorsPrimary
 }
 
 // Default returns the settings a fresh install starts with.
 func Default() Config {
 	return Config{
-		AlertLead:      Duration(1 * time.Minute),
-		NotifyLead:     Duration(5 * time.Minute),
-		OverlayTimeout: Duration(0),
-		PollInterval:   Duration(2 * time.Minute),
-		Use24Hour:      true,
-		TitleMaxLen:    30,
-		HideDeclined:   true,
+		AlertLead:       Duration(1 * time.Minute),
+		NotifyLead:      Duration(5 * time.Minute),
+		OverlayTimeout:  Duration(0),
+		PollInterval:    Duration(2 * time.Minute),
+		Use24Hour:       true,
+		TitleMaxLen:     30,
+		HideDeclined:    true,
+		OverlayMonitors: MonitorsPrimary,
 	}
 }
 
