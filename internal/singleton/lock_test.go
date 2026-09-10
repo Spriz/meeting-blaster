@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// holdEnv puts a re-executed copy of this test binary into "take the lock
-// and wait to be killed" mode, which is the only way to observe what
-// happens to a lock when the process holding it dies.
+// holdEnv re-executes this test binary as a child that takes the lock and
+// waits to be killed, the only way to observe what a process death does
+// to the lock.
 const holdEnv = "MEETING_BLASTER_SINGLETON_HOLD"
 
 func TestMain(m *testing.M) {
@@ -29,8 +29,8 @@ func holdLock(path string) {
 	}
 	os.Stdout.WriteString("held\n")
 
-	// The parent kills this process as soon as it reads the line above.
-	// The sleep only bounds how long a stranded child can linger.
+	// The sleep only bounds how long a stranded child can linger; the
+	// parent kills it as soon as it reads the line above.
 	time.Sleep(time.Minute)
 	os.Exit(0)
 }

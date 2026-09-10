@@ -10,21 +10,17 @@ import (
 	"github.com/go-gl/glfw/v3.4/glfw"
 )
 
-// respectBundleActivationPolicy stops the app claiming a Dock icon and a
-// menu bar when it is running from MeetingBlaster.app.
+// respectBundleActivationPolicy stops the app claiming a Dock icon when
+// it runs from MeetingBlaster.app.
 //
-// The bundle's Info.plist sets LSUIElement, which is how a menu-bar app
-// says it has no place in the Dock. GLFW overrides that: cocoa_init.m
-// forces NSApplicationActivationPolicyRegular whenever its menubar hint is
-// set, which it is by default, "in case we are unbundled". Clearing the
-// hint leaves the plist in charge.
+// The bundle's Info.plist sets LSUIElement, but GLFW overrides it:
+// cocoa_init.m forces NSApplicationActivationPolicyRegular whenever its
+// menubar hint is set, which it is by default, "in case we are unbundled".
 //
-// The unbundled binary - what the tarball and the mise install give you -
-// keeps GLFW's behaviour, because there is no plist to fall back on and an
-// app with no activation policy at all cannot focus its own windows.
+// The unbundled binary keeps GLFW's behaviour: there is no plist to fall
+// back on, and an app with no activation policy cannot focus its windows.
 //
-// Must be called before the first window is created, which is when Fyne
-// initialises GLFW.
+// Must run before the first window, which is when Fyne initialises GLFW.
 func respectBundleActivationPolicy() {
 	exe, err := os.Executable()
 	if err != nil || !insideAppBundle(exe) {
@@ -33,8 +29,8 @@ func respectBundleActivationPolicy() {
 	glfw.InitHint(glfw.CocoaMenubar, glfw.False)
 }
 
-// insideAppBundle reports whether exe is the executable of a .app, which
-// is the only case where there is an Info.plist to defer to.
+// insideAppBundle reports whether exe is the executable of a .app, the
+// only case with an Info.plist to defer to.
 func insideAppBundle(exe string) bool {
 	dir, file := filepath.Split(exe)
 	if file == "" {

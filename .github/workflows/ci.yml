@@ -28,8 +28,7 @@ jobs:
           minimum_release_age: 24h
           cache: true
 
-      # Same task a maintainer runs before pushing: go vet plus a gofmt
-      # check. Keeping it as one task stops the two drifting apart.
+      # The task a maintainer runs before pushing, so the two cannot drift.
       - name: Lint
         run: mise run lint
 
@@ -79,9 +78,8 @@ jobs:
       - name: Build
         run: go build ./...
 
-      # The release builds MeetingBlaster.app with the same script, and a
-      # packaging bug that only shows up at tag time means a release with
-      # a missing asset. Building the bundle here keeps that on the PR.
+      # Without this, a packaging bug only surfaces at tag time, as a
+      # release missing an asset.
       - name: Build the macOS app bundle
         if: runner.os == 'macOS'
         run: |

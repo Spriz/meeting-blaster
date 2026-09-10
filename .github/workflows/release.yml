@@ -16,7 +16,7 @@ permissions:
   id-token: write
   attestations: write
 
-# Windows runners default to PowerShell. One shell everywhere keeps the
+# Windows runners default to PowerShell; bash everywhere keeps the
 # packaging steps from forking per OS.
 defaults:
   run:
@@ -68,8 +68,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xorg-dev
 
-      # mise is skipped here as it is in CI: the Go version in go.mod is the
-      # same one mise.toml pins, and mise.toml's GOFLAGS only suit Linux.
+      # mise is skipped as it is in CI: go.mod pins the same Go version,
+      # and mise.toml's GOFLAGS only suit Linux.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -78,9 +78,6 @@ jobs:
       - name: Test
         run: go test ./...
 
-      # Build flags, archive layout and the per-target differences all
-      # live in scripts/release.sh, so a maintainer can reproduce any
-      # asset locally instead of reading them out of this file.
       - name: Build
         run: scripts/release.sh build "$VERSION" ${{ matrix.target }}
 
