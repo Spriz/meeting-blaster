@@ -85,3 +85,13 @@ jobs:
       # compile, fix the source rather than narrowing this job.
       - name: Build
         run: go build ./...
+
+      # The release builds MeetingBlaster.app from this script, and a
+      # packaging bug that only shows up at tag time means a release with
+      # a missing asset. Building the bundle here keeps that on the PR.
+      - name: Build the macOS app bundle
+        if: runner.os == 'macOS'
+        run: |
+          go build -o dist/meeting-blaster ./cmd/meeting-blaster
+          scripts/macos-bundle.sh dev dist dist/meeting-blaster
+          plutil -lint dist/MeetingBlaster.app/Contents/Info.plist
