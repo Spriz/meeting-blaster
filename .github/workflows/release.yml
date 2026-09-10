@@ -16,70 +16,154 @@ permissions:
   id-token: write
   attestations: write
 
+# Windows runners default to PowerShell; bash everywhere keeps the
+# packaging steps from forking per OS.
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  release:
-    name: Build and publish
+  version:
+    name: Resolve version
     runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.resolve.outputs.value }}
+    steps:
+      # On workflow_dispatch GITHUB_REF_NAME is the branch the run was
+      # started from, so the explicit input has to win.
+      - id: resolve
+        run: |
+          value="${{ inputs.tag }}"
+          if [ -z "$value" ]; then value="$GITHUB_REF_NAME"; fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-latest
+          - target: darwin-arm64
+            runner: macos-latest
+          # macos-13 was retired in December 2025; macos-15-intel is the
+          # current x86_64 image. GitHub drops Intel macOS altogether once
+          # the macOS 15 image goes, currently slated for autumn 2027.
+          - target: darwin-amd64
+            runner: macos-15-intel
+          - target: windows-amd64
+            runner: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.value }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       # Fyne renders through GLFW, which needs the X11 development headers.
-      # This is also why there is no cross-compiled build here: CGO would
-      # need a full X11 sysroot for every target.
       - name: Install X11 headers
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y xorg-dev
 
-      - uses: jdx/mise-action@v4
+      # mise is skipped as it is in CI: go.mod pins the same Go version,
+      # and mise.toml's GOFLAGS only suit Linux.
+      - uses: actions/setup-go@v6
         with:
-          # Select published releases instead of racing the CDN version update.
-          minimum_release_age: 24h
+          go-version-file: go.mod
           cache: true
-      - name: Resolve version
-        id: version
-        run: echo "value=${GITHUB_REF_NAME:-${{ inputs.tag }}}" >> "$GITHUB_OUTPUT"
 
       - name: Test
         run: go test ./...
 
       - name: Build
-        env:
-          CGO_ENABLED: "1"
-          GOFLAGS: "-tags=x11"
-        run: |
-          mkdir -p dist
-          go build -trimpath \
-            -ldflags "-s -w -X main.version=${{ steps.version.outputs.value }}" \
-            -o dist/meeting-blaster ./cmd/meeting-blaster
+        run: scripts/release.sh build "$VERSION" ${{ matrix.target }}
 
       - name: Package
-        working-directory: dist
+        run: scripts/release.sh package "$VERSION" ${{ matrix.target }}
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: assets-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload macOS binary for bundling
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.target }}
+          path: dist/meeting-blaster
+          if-no-files-found: error
+
+  bundle-macos:
+    name: Bundle MeetingBlaster.app
+    needs: [version, build]
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binary-darwin-*
+          path: binaries
+
+      - name: Assemble the bundle
         run: |
-          name="meeting-blaster-${{ steps.version.outputs.value }}-linux-amd64"
-          mkdir -p "$name"
-          cp meeting-blaster "$name/"
-          cp ../LICENSE ../README.md "$name/"
-          cp -r ../packaging "$name/"
-          tar -czf "$name.tar.gz" "$name"
-          sha256sum "$name.tar.gz" > checksums.txt
-          ls -la
+          scripts/release.sh bundle "$VERSION" dist \
+            binaries/binary-darwin-arm64/meeting-blaster \
+            binaries/binary-darwin-amd64/meeting-blaster
+          lipo -info dist/MeetingBlaster.app/Contents/MacOS/meeting-blaster
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: assets-macos-app
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [version, build, bundle-macos]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: assets-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: scripts/release.sh checksums dist
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v3
         with:
-          subject-path: dist/*.tar.gz
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
 
+      # One publishing job, so the four builds cannot race each other to
+      # create the release.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.version.outputs.value }}" \
-            dist/*.tar.gz dist/checksums.txt \
-            --title "${{ steps.version.outputs.value }}" \
+          gh release create "$VERSION" \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt \
+            --title "$VERSION" \
             --generate-notes \
             --verify-tag || \
-          gh release upload "${{ steps.version.outputs.value }}" \
-            dist/*.tar.gz dist/checksums.txt --clobber
+          gh release upload "$VERSION" \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber

@@ -171,31 +171,66 @@ both of which are already in the systemd user environment on GNOME. It is
 installed and controlled through `scripts/service.sh`.
 
 Enabling the service deletes the autostart `.desktop`, because the two would
-each launch a copy. `internal/singleton` is the backstop: an flock on a file
-in `XDG_RUNTIME_DIR`, released by the kernel when the process dies, so a
-crash cannot strand a stale lock. Without it, two copies means two tray icons
-and two full-screen alerts.
+each launch a copy. `internal/singleton` is the backstop, and its one real
+requirement is that the lock dies with the process: an flock on a file in
+`XDG_RUNTIME_DIR` on Unix, a named kernel mutex on Windows. A lock *file* is
+the wrong primitive on Windows - nothing deletes it after a crash, and the
+app then refuses to start for good, saying only that another copy is
+running. `TestLockDiesWithTheProcessHoldingIt` kills a child that holds the
+lock and then retakes it; keep it passing.
 
-None of this exists for macOS or Windows.
+The systemd unit itself is Linux-only; macOS and Windows have no equivalent
+yet.
 
 ## Platform support
 
-Linux is the only target actually *run* here. macOS and Windows are compiled
-and tested natively in CI (the `native` matrix job in `.github/workflows/ci.yml`
-builds every package, including `cmd/`, `overlay`, `prefs` and `tray`, with
-cgo enabled), but neither is a currently verified runtime target. Do not
-describe them as working. If a native job fails, fix the source; do not
-narrow the job back to a package subset.
+Linux is the target that actually gets used. Every release publishes Linux,
+macOS (arm64, amd64, and a universal `MeetingBlaster.app`) and Windows
+binaries, each built natively by the matrix in
+`.github/workflows/release.yml`, and the `native` job in `ci.yml` compiles
+and tests macOS and Windows on every PR. If a native job fails, fix the
+source; do not narrow the job back to a package subset.
 
-A limited historical run on macOS surfaced that the overlay appeared and the
-alert fired, but the process exited when the overlay closed (see Threading
-above). This is only a historical observation, not support verification; do
-not claim that macOS now works.
+Build flags, archive layout and bundle assembly belong in
+`scripts/release.sh` (exposed as the `release:*` mise tasks), not in the
+workflow. The workflow decides *what runs where*; the script decides what
+an asset is, so a maintainer can reproduce one without pushing a tag. A
+per-target difference added straight to the YAML is a difference nobody
+can debug locally.
 
-The known asymmetry: `systray.SetTitle` is documented as Mac and Linux only.
-Windows has no text in the tray at all, so `setLabel` there folds the
-countdown into the tooltip (`internal/tray/setlabel_windows.go`). Any feature
-that assumes a readable tray label needs a Windows answer.
+macOS has been run end to end from the bundle: tray, alert, auto-dismiss,
+and the process still polling afterwards. Windows has never been run by
+anyone. CI compiling and testing it is not the same thing, so do not
+describe it as working.
+
+Three per-OS traps, each already paid for once:
+
+- GLFW forces `NSApplicationActivationPolicyRegular` (`cocoa_init.m`)
+  whenever its menubar hint is set, which overrides `LSUIElement` and gives
+  a menu-bar app a Dock icon. `respectBundleActivationPolicy` in
+  `cmd/meeting-blaster` clears the hint, but only when the executable sits
+  inside a `.app`: an unbundled binary has no plist to fall back on and
+  would end up with no activation policy and no way to focus its windows.
+- The Windows binary is linked with `-H=windowsgui`, so no console window
+  sits behind the tray app. That also leaves the process with no standard
+  handles, which is why `internal/console` attaches to the launching
+  terminal. Without it every `fmt.Print` in `cmd/`, the setup guidance
+  included, goes nowhere.
+- `systray.SetTitle` is documented as Mac and Linux only. Windows has no
+  text in the tray at all, so `setLabel` there folds the countdown into the
+  tooltip (`internal/tray/setlabel_windows.go`). Any feature that assumes a
+  readable tray label needs a Windows answer.
+
+### Release assets
+
+`mise use -g github:Spriz/meeting-blaster` resolves through ubi, which
+filters assets by OS, then by architecture, and if more than one still
+survives sorts by name and takes the first. It has to land on the per-arch
+tarballs, which is why the bundle is published as
+`MeetingBlaster-<tag>-macos-universal.zip`: "universal" is not an
+architecture token ubi knows, so the bundle drops out before the tie-break.
+Renaming it to anything containing `all`, `arm64` or `x86_64` would start
+handing people a `.app` directory where they expect a binary.
 
 ## Monitor targeting
 

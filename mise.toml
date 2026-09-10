@@ -77,3 +77,16 @@ run = "./scripts/uninstall.sh"
 
 [tasks.tidy]
 run = "go mod tidy"
+
+# Targets: linux-amd64, darwin-arm64, darwin-amd64, windows-amd64.
+[tasks."release:build"]
+description = "Build a release binary, e.g. mise run release:build v1.2.3 darwin-arm64"
+run = "./scripts/release.sh build"
+
+[tasks."release:package"]
+description = "Archive a built binary, e.g. mise run release:package v1.2.3 darwin-arm64"
+run = "./scripts/release.sh package"
+
+[tasks."release:bundle"]
+description = "Wrap built binaries in MeetingBlaster.app, e.g. mise run release:bundle v1.2.3 dist dist/meeting-blaster"
+run = "./scripts/release.sh bundle"

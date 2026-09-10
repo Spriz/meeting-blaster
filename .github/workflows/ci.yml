@@ -28,17 +28,9 @@ jobs:
           minimum_release_age: 24h
           cache: true
 
-      - name: Verify formatting
-        run: |
-          unformatted=$(gofmt -l cmd internal)
-          if [ -n "$unformatted" ]; then
-            echo "These files need gofmt:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: Vet
-        run: go vet ./...
+      # The task a maintainer runs before pushing, so the two cannot drift.
+      - name: Lint
+        run: mise run lint
 
       - name: Test
         run: go test -race ./...
@@ -85,3 +77,12 @@ jobs:
       # compile, fix the source rather than narrowing this job.
       - name: Build
         run: go build ./...
+
+      # Without this, a packaging bug only surfaces at tag time, as a
+      # release missing an asset.
+      - name: Build the macOS app bundle
+        if: runner.os == 'macOS'
+        run: |
+          scripts/release.sh build dev darwin-$(go env GOARCH)
+          scripts/release.sh bundle dev dist dist/meeting-blaster
+          plutil -lint dist/MeetingBlaster.app/Contents/Info.plist

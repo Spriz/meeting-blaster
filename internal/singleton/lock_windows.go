@@ -3,28 +3,51 @@
 package singleton
 
 import (
+	"errors"
 	"fmt"
-	"os"
+	"path/filepath"
+	"strings"
 	"sync"
+
+	"golang.org/x/sys/windows"
 )
 
-// Windows has no flock. Opening the file for exclusive access gives the
-// same guarantee: the second process cannot open it while the first holds
-// it, and the handle is closed when the process dies.
+// Windows has no flock, and a lock file is the wrong substitute: nothing
+// deletes it when a process is killed, so one crash leaves a lock nobody
+// owns and the app refuses to start for good. A named mutex is a kernel
+// object, destroyed with its last handle, which process death closes.
 func acquire(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0o600)
+	name, err := windows.UTF16PtrFromString(mutexName(path))
 	if err != nil {
-		if os.IsExist(err) {
-			return nil, ErrAlreadyRunning{Path: path}
-		}
-		return nil, fmt.Errorf("open lock file %s: %w", path, err)
+		return nil, fmt.Errorf("lock name for %s: %w", path, err)
+	}
+
+	// CreateMutex opens the existing object rather than failing, so this
+	// branch owns a handle it has to close.
+	handle, err := windows.CreateMutex(nil, false, name)
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		_ = windows.CloseHandle(handle)
+		return nil, ErrAlreadyRunning{Path: path}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock %s: %w", path, err)
 	}
 
 	var once sync.Once
 	return func() {
-		once.Do(func() {
-			_ = f.Close()
-			_ = os.Remove(path)
-		})
+		once.Do(func() { _ = windows.CloseHandle(handle) })
 	}, nil
+}
+
+// mutexName flattens the lock path into a legal object name: only the
+// namespace separator may be a backslash. Local scopes the mutex to the
+// login session, so two users on one machine get a copy each.
+func mutexName(path string) string {
+	flat := strings.Map(func(r rune) rune {
+		if r == '\\' || r == '/' || r == ':' {
+			return '_'
+		}
+		return r
+	}, filepath.Clean(path))
+	return `Local\` + flat
 }
