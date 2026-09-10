@@ -1,7 +1,8 @@
 # meeting-blaster
 
 Your next meeting in the system tray, and a full-screen alert before it
-starts. A [MeetingBar](https://meetingbar.app) equivalent that runs on Linux.
+starts. A [MeetingBar](https://meetingbar.app) equivalent, built for Linux,
+with macOS and Windows binaries in every release.
 
 **[spriz.github.io/meeting-blaster](https://spriz.github.io/meeting-blaster/)**
 
@@ -69,8 +70,20 @@ install.
 
 ### From a release archive
 
-Download the latest `linux-amd64` tarball from
-[Releases](https://github.com/Spriz/meeting-blaster/releases), then:
+Every release publishes:
+
+| Asset | For |
+| --- | --- |
+| `meeting-blaster-<tag>-linux-amd64.tar.gz` | Linux |
+| `meeting-blaster-<tag>-darwin-arm64.tar.gz` | macOS, Apple Silicon |
+| `meeting-blaster-<tag>-darwin-amd64.tar.gz` | macOS, Intel |
+| `MeetingBlaster-<tag>-macos-universal.zip` | macOS, as an app bundle |
+| `meeting-blaster-<tag>-windows-amd64.zip` | Windows |
+
+Checksums are published alongside as `checksums.txt`, and every archive
+carries GitHub build provenance.
+
+Linux:
 
 ```sh
 tar -xzf meeting-blaster-*-linux-amd64.tar.gz
@@ -78,12 +91,26 @@ cd meeting-blaster-*-linux-amd64
 install -m 0755 meeting-blaster ~/.local/bin/
 ```
 
-Checksums are published alongside each release as `checksums.txt`.
+macOS. The bundle is the better of the two: it keeps the app out of the
+Dock, the way a menu-bar app should be. Nothing here is signed by a paid
+Apple developer account, so Gatekeeper refuses the first launch until the
+quarantine flag is off:
+
+```sh
+unzip MeetingBlaster-*-macos-universal.zip
+xattr -dr com.apple.quarantine MeetingBlaster.app
+mv MeetingBlaster.app /Applications/
+```
+
+Windows. Unzip and run `meeting-blaster.exe`; SmartScreen will warn about
+an unrecognised app, and **More info → Run anyway** gets past it. The
+binary is windowless, so a command line flag like `--version` prints into
+the terminal you started it from *after* the prompt has come back.
 
 ### From source
 
-Building needs a Go toolchain (managed by [mise](https://mise.jdx.dev)) and
-the X11 development headers, because Fyne renders through GLFW:
+Building needs a Go toolchain (managed by [mise](https://mise.jdx.dev)) and,
+on Linux, the X11 development headers, because Fyne renders through GLFW:
 
 ```sh
 sudo apt install xorg-dev          # Debian/Ubuntu
@@ -95,6 +122,11 @@ mise run build                     # -> ./bin/meeting-blaster
 Fedora: `sudo dnf install libX11-devel libXcursor-devel libXrandr-devel
 libXinerama-devel libXi-devel mesa-libGL-devel`.
 Arch: `sudo pacman -S libx11 libxcursor libxrandr libxinerama libxi mesa`.
+
+macOS and Windows need no such headers, only a C compiler — the Xcode
+command line tools or Mingw-w64 — and `GOFLAGS` without `-tags=x11`, which
+is a Linux-only backend selector. `scripts/macos-bundle.sh <version> <dir>
+<binary>` wraps a built binary in `MeetingBlaster.app`.
 
 ### Desktop integration
 
@@ -229,17 +261,20 @@ manager, as though `active` were set.
 
 ## Platform support
 
-Linux is built and tested. macOS and Windows sources are present and compile
-under their `GOOS`, but have not been run — treat them as unfinished.
+Linux is the platform this is built for and used on. macOS and Windows are
+compiled and tested natively in CI, and macOS has been run end to end - the
+tray, the alert, and the app surviving the alert closing. Nobody has used
+it on Windows yet.
 
 On Windows the tray shows no text label (the OS has no such concept), so the
 countdown appears in the hover tooltip and the full-screen alert does the
 heavy lifting.
 
-Desktop integration is Linux-only too. The `.desktop` entry, the icon
-install, and the systemd service all assume freedesktop conventions. macOS
-would need an `.app` bundle and a launchd agent; Windows a shortcut and a
-Startup or Task Scheduler entry.
+Starting with your session is Linux-only. The `.desktop` entry, the icon
+install, and the systemd service all assume freedesktop conventions; macOS
+would need a launchd agent and Windows a Startup or Task Scheduler entry.
+Neither is written. `MeetingBlaster.app` does at least make the app a
+normal macOS install rather than a loose binary.
 
 ## Contributing
 

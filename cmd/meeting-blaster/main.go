@@ -22,6 +22,7 @@ import (
 	"github.com/spriz/meeting-blaster/internal/calendar/ics"
 	"github.com/spriz/meeting-blaster/internal/calendar/multi"
 	"github.com/spriz/meeting-blaster/internal/config"
+	"github.com/spriz/meeting-blaster/internal/console"
 	"github.com/spriz/meeting-blaster/internal/engine"
 	"github.com/spriz/meeting-blaster/internal/notify"
 	"github.com/spriz/meeting-blaster/internal/overlay"
@@ -38,6 +39,9 @@ const appID = "com.github.spriz.meeting-blaster"
 var version = "dev"
 
 func main() {
+	// Before anything prints, and before the logger takes os.Stderr.
+	console.Attach()
+
 	var (
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		verbose     = flag.Bool("v", false, "log at debug level")
@@ -122,6 +126,8 @@ func run(log *slog.Logger, testAlert bool) error {
 		return setupInstructions()
 	}
 	provider := multi.New(log, sources...)
+
+	respectBundleActivationPolicy()
 
 	// The Fyne app must be created on the main goroutine, before anything
 	// tries to show a window.
