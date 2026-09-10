@@ -124,9 +124,14 @@ libXinerama-devel libXi-devel mesa-libGL-devel`.
 Arch: `sudo pacman -S libx11 libxcursor libxrandr libxinerama libxi mesa`.
 
 macOS and Windows need no such headers, only a C compiler — the Xcode
-command line tools or Mingw-w64 — and `GOFLAGS` without `-tags=x11`, which
-is a Linux-only backend selector. `scripts/macos-bundle.sh <version> <dir>
-<binary>` wraps a built binary in `MeetingBlaster.app`.
+command line tools or Mingw-w64. `scripts/release.sh` builds, archives and
+bundles exactly what a tagged release publishes, one step at a time:
+
+```sh
+mise run release:build   v1.2.3 darwin-arm64      # -> dist/meeting-blaster
+mise run release:package v1.2.3 darwin-arm64      # -> dist/*.tar.gz
+mise run release:bundle  v1.2.3 dist dist/meeting-blaster
+```
 
 ### Desktop integration
 

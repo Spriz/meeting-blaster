@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Template for MeetingBlaster.app; scripts/macos-bundle.sh substitutes
+  Template for MeetingBlaster.app; scripts/release.sh substitutes
   @VERSION@. CFBundleIdentifier must stay equal to the appID constant in
   cmd/meeting-blaster/main.go, which is what Fyne stores preferences under.
 

@@ -191,6 +191,13 @@ binaries, each built natively by the matrix in
 and tests macOS and Windows on every PR. If a native job fails, fix the
 source; do not narrow the job back to a package subset.
 
+Build flags, archive layout and bundle assembly belong in
+`scripts/release.sh` (exposed as the `release:*` mise tasks), not in the
+workflow. The workflow decides *what runs where*; the script decides what
+an asset is, so a maintainer can reproduce one without pushing a tag. A
+per-target difference added straight to the YAML is a difference nobody
+can debug locally.
+
 macOS has been run end to end from the bundle: tray, alert, auto-dismiss,
 and the process still polling afterwards. Windows has never been run by
 anyone. CI compiling and testing it is not the same thing, so do not
