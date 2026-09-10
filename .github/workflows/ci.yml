@@ -28,17 +28,10 @@ jobs:
           minimum_release_age: 24h
           cache: true
 
-      - name: Verify formatting
-        run: |
-          unformatted=$(gofmt -l cmd internal)
-          if [ -n "$unformatted" ]; then
-            echo "These files need gofmt:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: Vet
-        run: go vet ./...
+      # Same task a maintainer runs before pushing: go vet plus a gofmt
+      # check. Keeping it as one task stops the two drifting apart.
+      - name: Lint
+        run: mise run lint
 
       - name: Test
         run: go test -race ./...
@@ -86,12 +79,12 @@ jobs:
       - name: Build
         run: go build ./...
 
-      # The release builds MeetingBlaster.app from this script, and a
+      # The release builds MeetingBlaster.app with the same script, and a
       # packaging bug that only shows up at tag time means a release with
       # a missing asset. Building the bundle here keeps that on the PR.
       - name: Build the macOS app bundle
         if: runner.os == 'macOS'
         run: |
-          go build -o dist/meeting-blaster ./cmd/meeting-blaster
-          scripts/macos-bundle.sh dev dist dist/meeting-blaster
+          scripts/release.sh build dev darwin-$(go env GOARCH)
+          scripts/release.sh bundle dev dist dist/meeting-blaster
           plutil -lint dist/MeetingBlaster.app/Contents/Info.plist

@@ -47,29 +47,16 @@ jobs:
         include:
           - target: linux-amd64
             runner: ubuntu-latest
-            binary: meeting-blaster
-            # Fyne's GLFW builds both X11 and Wayland backends unless told
-            # otherwise, and Wayland would need headers this runner lacks.
-            goflags: "-tags=x11"
           - target: darwin-arm64
             runner: macos-latest
-            binary: meeting-blaster
           # macos-13 was retired in December 2025; macos-15-intel is the
           # current x86_64 image. GitHub drops Intel macOS altogether once
           # the macOS 15 image goes, currently slated for autumn 2027.
           - target: darwin-amd64
             runner: macos-15-intel
-            binary: meeting-blaster
           - target: windows-amd64
             runner: windows-latest
-            binary: meeting-blaster.exe
-            # Without -H=windowsgui a console window sits behind the tray
-            # app for the whole session. internal/console is what keeps
-            # the command line flags printing anyway.
-            ldflags: "-H=windowsgui"
     env:
-      CGO_ENABLED: "1"
-      GOFLAGS: ${{ matrix.goflags }}
       VERSION: ${{ needs.version.outputs.value }}
     steps:
       - uses: actions/checkout@v7
@@ -91,35 +78,14 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # Build flags, archive layout and the per-target differences all
+      # live in scripts/release.sh, so a maintainer can reproduce any
+      # asset locally instead of reading them out of this file.
       - name: Build
-        run: |
-          mkdir -p dist
-          go build -trimpath \
-            -ldflags "-s -w -X main.version=$VERSION ${{ matrix.ldflags }}" \
-            -o "dist/${{ matrix.binary }}" ./cmd/meeting-blaster
+        run: scripts/release.sh build "$VERSION" ${{ matrix.target }}
 
-      - name: Package tarball
-        if: runner.os != 'Windows'
-        run: |
-          name="meeting-blaster-$VERSION-${{ matrix.target }}"
-          mkdir -p "dist/$name"
-          cp "dist/${{ matrix.binary }}" LICENSE README.md "dist/$name/"
-          # The systemd unit and desktop entry are Linux-only, and the
-          # macOS equivalent ships as the .app bundle instead.
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            mkdir -p "dist/$name/packaging"
-            cp packaging/meeting-blaster.desktop \
-               packaging/meeting-blaster.service "dist/$name/packaging/"
-          fi
-          tar -czf "dist/$name.tar.gz" -C dist "$name"
-
-      - name: Package zip
-        if: runner.os == 'Windows'
-        run: |
-          name="meeting-blaster-$VERSION-${{ matrix.target }}"
-          mkdir -p "dist/$name"
-          cp "dist/${{ matrix.binary }}" LICENSE README.md "dist/$name/"
-          (cd dist && 7z a -tzip "$name.zip" "$name" > /dev/null)
+      - name: Package
+        run: scripts/release.sh package "$VERSION" ${{ matrix.target }}
 
       - name: Upload archive
         uses: actions/upload-artifact@v7
@@ -154,22 +120,10 @@ jobs:
 
       - name: Assemble the bundle
         run: |
-          mkdir -p dist
-          scripts/macos-bundle.sh "$VERSION" dist \
+          scripts/release.sh bundle "$VERSION" dist \
             binaries/binary-darwin-arm64/meeting-blaster \
             binaries/binary-darwin-amd64/meeting-blaster
           lipo -info dist/MeetingBlaster.app/Contents/MacOS/meeting-blaster
-
-      # ditto is the archiver that preserves bundle structure; a plain zip
-      # mangles symlinks and extended attributes.
-      #
-      # The name deliberately carries no architecture token that ubi
-      # recognises, which is how mise keeps picking the per-arch tarballs
-      # for "mise use -g github:Spriz/meeting-blaster" instead of this.
-      - name: Zip the bundle
-        run: |
-          (cd dist && ditto -c -k --keepParent \
-            MeetingBlaster.app "MeetingBlaster-$VERSION-macos-universal.zip")
 
       - name: Upload the bundle
         uses: actions/upload-artifact@v7
@@ -194,10 +148,7 @@ jobs:
           path: dist
 
       - name: Checksums
-        working-directory: dist
-        run: |
-          sha256sum *.tar.gz *.zip > checksums.txt
-          cat checksums.txt
+        run: scripts/release.sh checksums dist
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v3
