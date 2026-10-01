@@ -70,7 +70,7 @@ jobs:
 
       # mise is skipped as it is in CI: go.mod pins the same Go version,
       # and mise.toml's GOFLAGS only suit Linux.
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
