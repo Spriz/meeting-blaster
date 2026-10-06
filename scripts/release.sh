@@ -2,6 +2,7 @@
 # Builds and packages release assets, so they can be reproduced without
 # pushing a tag:
 #
+#   scripts/release.sh test      <target>
 #   scripts/release.sh build     <version> <target> [dist-dir]
 #   scripts/release.sh package   <version> <target> [dist-dir]
 #   scripts/release.sh bundle    <version> <dist-dir> <binary> [binary...]
@@ -41,6 +42,14 @@ target_settings() {
       ;;
     *) die "unknown target: $1" ;;
   esac
+}
+
+# The tests compile cmd/ and Fyne too, so they need the target's GOFLAGS
+# just as the build does.
+cmd_test() {
+  [ "$#" -ge 1 ] || die "usage: $0 test <target>"
+  target_settings "$1"
+  (cd "$repo_root" && CGO_ENABLED=1 GOFLAGS="$goflags" go test ./...)
 }
 
 cmd_build() {
@@ -161,13 +170,13 @@ cmd_checksums() {
 }
 
 case "${1:-}" in
-  build | package | bundle | checksums)
+  test | build | package | bundle | checksums)
     command="$1"
     shift
     "cmd_$command" "$@"
     ;;
   *)
-    sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
     exit 1
     ;;
 esac

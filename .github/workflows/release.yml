@@ -76,7 +76,7 @@ jobs:
           cache: true
 
       - name: Test
-        run: go test ./...
+        run: scripts/release.sh test ${{ matrix.target }}
 
       - name: Build
         run: scripts/release.sh build "$VERSION" ${{ matrix.target }}

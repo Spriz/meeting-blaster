@@ -79,6 +79,10 @@ run = "./scripts/uninstall.sh"
 run = "go mod tidy"
 
 # Targets: linux-amd64, darwin-arm64, darwin-amd64, windows-amd64.
+[tasks."release:test"]
+description = "Run the tests with a target's build flags, e.g. mise run release:test linux-amd64"
+run = "./scripts/release.sh test"
+
 [tasks."release:build"]
 description = "Build a release binary, e.g. mise run release:build v1.2.3 darwin-arm64"
 run = "./scripts/release.sh build"
