@@ -52,7 +52,7 @@ jobs:
 
       # mise is skipped here: the Go version already lives in go.mod, and
       # mise.toml's GOFLAGS=-tags=x11 only picks GLFW's Linux backend.
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
