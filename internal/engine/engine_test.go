@@ -561,3 +561,51 @@ func ids(events []calendar.Event) []string {
 	}
 	return out
 }
+
+// TestAllDayEventsAreKeptApart guards the split: an all-day event is listed
+// in the agenda but must never become the countdown target or alert, and it
+// obeys the same calendar selection and declined preferences as a meeting.
+func TestAllDayEventsAreKeptApart(t *testing.T) {
+	cfg := config.Default()
+	cfg.CalendarIDs = []string{"work"}
+	holiday := calendar.Event{ID: "holiday", CalendarID: "work", Title: "holiday", AllDay: true,
+		Start: base.Add(-9 * time.Hour), End: base.Add(15 * time.Hour)}
+	other := holiday
+	other.ID, other.CalendarID = "other", "personal"
+	declined := holiday
+	declined.ID, declined.Declined = "declined", true
+	standup := ev("standup", 30*time.Minute, 15*time.Minute)
+	standup.CalendarID = "work"
+
+	var alerts []string
+	e := New(&sequenceProvider{events: [][]calendar.Event{{holiday, other, declined, standup}}}, cfg, Callbacks{
+		OnAlert: func(event calendar.Event) { alerts = append(alerts, event.ID) },
+	}, nil)
+	e.now = func() time.Time { return base }
+	e.poll(context.Background())
+
+	state := e.Snapshot()
+	if got := ids(state.AllDay); len(got) != 1 || got[0] != "holiday" {
+		t.Errorf("all-day = %v, want [holiday]", got)
+	}
+	if got := ids(state.Events); len(got) != 1 || got[0] != "standup" {
+		t.Errorf("events = %v, want [standup]", got)
+	}
+	if state.Next == nil || state.Next.ID != "standup" {
+		t.Errorf("next = %v, want standup", state.Next)
+	}
+	for _, id := range alerts {
+		if id == "holiday" {
+			t.Error("an all-day event fired an alert")
+		}
+	}
+
+	t.Run("selection change refilters", func(t *testing.T) {
+		personal := cfg
+		personal.CalendarIDs = []string{"personal"}
+		e.SetConfig(personal)
+		if got := ids(e.Snapshot().AllDay); len(got) != 0 {
+			t.Errorf("all-day after deselecting work = %v, want none", got)
+		}
+	})
+}

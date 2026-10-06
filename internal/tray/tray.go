@@ -3,6 +3,7 @@ package tray
 import (
 	_ "embed"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -152,7 +153,7 @@ func (t *Tray) Update(state engine.State, cfg config.Config, now time.Time) {
 	label := Label(state, cfg, now)
 	setLabel(label, Tooltip(state, cfg, now))
 
-	key := agendaKey(state)
+	key := agendaKey(state, now)
 	t.mu.Lock()
 	changed := t.lastSet != key
 	t.lastSet = key
@@ -186,20 +187,13 @@ func (t *Tray) rebuildAgenda(state engine.State, cfg config.Config, now time.Tim
 	defer t.mu.Unlock()
 
 	shown := 0
-	for _, ev := range state.Events {
+	for _, ev := range agendaEvents(state, now) {
 		if shown >= agendaSlots {
 			break
 		}
-		// Meetings that finished are noise; keep the menu about what is
-		// still ahead.
-		if ev.End.Before(now) {
-			continue
-		}
 
 		item := t.agenda[shown]
-		item.SetTitle(fmt.Sprintf("%s  %s",
-			ev.Start.Format(cfg.TimeLayout()),
-			Truncate(ev.Title, 40)))
+		item.SetTitle(agendaTitle(ev, cfg))
 
 		if ev.HasLink() {
 			item.SetTooltip("Click to join " + ev.Title)
@@ -220,16 +214,54 @@ func (t *Tray) rebuildAgenda(state engine.State, cfg config.Config, now time.Tim
 	}
 }
 
-// agendaKey summarises the agenda so Update can skip rebuilding when only
-// the countdown moved. Include the calendar because shared copies can have
-// the same event ID but different join links.
-func agendaKey(state engine.State) string {
-	key := make([]byte, 0, 64)
-	for _, ev := range state.Events {
-		key = append(key, ev.CalendarID...)
-		key = append(key, byte('|'))
-		key = append(key, ev.ID...)
-		key = append(key, byte('|'))
+// agendaEvents is the menu's list: today's all-day events first, then
+// today's meetings.
+func agendaEvents(state engine.State, now time.Time) []calendar.Event {
+	return append(todaysAgenda(state.AllDay, now), todaysAgenda(state.Events, now)...)
+}
+
+// agendaTitle is one menu row. An all-day event has no start time worth
+// showing; "00:00" would read like a midnight meeting.
+func agendaTitle(ev calendar.Event, cfg config.Config) string {
+	when := "All day"
+	if !ev.AllDay {
+		when = ev.Start.Format(cfg.TimeLayout())
 	}
-	return string(key)
+	return fmt.Sprintf("%s  %s", when, Truncate(ev.Title, 40))
+}
+
+// todaysAgenda keeps the meetings still ahead today. The engine fetches
+// through tomorrow so alerts work across midnight, but the menu is today's
+// agenda; a meeting that finished is noise.
+func todaysAgenda(events []calendar.Event, now time.Time) []calendar.Event {
+	midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+	var out []calendar.Event
+	for _, ev := range events {
+		if ev.End.Before(now) || !ev.Start.Before(midnight) {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// agendaKey summarises the agenda so Update can skip rebuilding when only
+// the countdown moved. It covers everything a row shows, not just event
+// IDs: an event edited in the calendar keeps its ID, and a join link added
+// later would otherwise leave the row greyed out. The date is included
+// because the agenda is filtered to today.
+func agendaKey(state engine.State, now time.Time) string {
+	var key strings.Builder
+	key.WriteString(now.Format("2006-01-02"))
+	for _, events := range [][]calendar.Event{state.AllDay, state.Events} {
+		for _, ev := range events {
+			for _, field := range []string{ev.CalendarID, ev.ID, ev.Title, ev.MeetingURL, ev.Location} {
+				key.WriteByte('|')
+				key.WriteString(field)
+			}
+			key.WriteByte('|')
+			key.WriteString(ev.End.UTC().Format(time.RFC3339))
+		}
+	}
+	return key.String()
 }

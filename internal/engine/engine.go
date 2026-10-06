@@ -21,6 +21,10 @@ type State struct {
 	// Events are today's watched events, ordered by start time.
 	Events []calendar.Event
 
+	// AllDay are the watched all-day events in the fetch window. They are
+	// listed, but never counted down to or alerted on.
+	AllDay []calendar.Event
+
 	// Next is the meeting the countdown refers to: the one in progress,
 	// or else the soonest upcoming. Nil when the day is clear.
 	Next *calendar.Event
@@ -143,6 +147,7 @@ func (e *Engine) SetConfig(cfg config.Config) {
 	e.mu.Lock()
 	e.cfg = cfg
 	e.state.Events = Filter(e.state.Events, cfg)
+	e.state.AllDay = FilterAllDay(e.state.AllDay, cfg)
 	e.state.Next = NextMeeting(e.state.Events, e.now())
 	e.mu.Unlock()
 
@@ -203,9 +208,11 @@ func (e *Engine) poll(ctx context.Context) {
 	}
 
 	e.mu.Lock()
+	allDay := FilterAllDay(events, e.cfg)
 	events = Filter(events, e.cfg)
 	e.state = State{
 		Events:    events,
+		AllDay:    allDay,
 		Next:      NextMeeting(events, e.now()),
 		Err:       nil,
 		UpdatedAt: e.now(),
@@ -305,10 +312,19 @@ func (e *Engine) pruneFired(now time.Time) {
 // Filter applies selection and declined-event preferences, drops all-day
 // events, then deduplicates reliable shared occurrences.
 func Filter(events []calendar.Event, cfg config.Config) []calendar.Event {
+	return filter(events, cfg, false)
+}
+
+// FilterAllDay is Filter for the all-day events it drops.
+func FilterAllDay(events []calendar.Event, cfg config.Config) []calendar.Event {
+	return filter(events, cfg, true)
+}
+
+func filter(events []calendar.Event, cfg config.Config, allDay bool) []calendar.Event {
 	out := make([]calendar.Event, 0, len(events))
 	var representatives map[occurrenceIdentity]int
 	for _, ev := range events {
-		if ev.AllDay || !cfg.Watches(ev.CalendarID) || (cfg.HideDeclined && ev.Declined) {
+		if ev.AllDay != allDay || !cfg.Watches(ev.CalendarID) || (cfg.HideDeclined && ev.Declined) {
 			continue
 		}
 		if ev.UID == "" {

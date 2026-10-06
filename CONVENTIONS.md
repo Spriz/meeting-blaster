@@ -161,7 +161,9 @@ exists; dereferencing it crashed the app before it showed an icon.
 - The engine tracks fired alerts per `(event, start, kind)` so an alert fires
   exactly once even though `tick` re-evaluates every second.
   `TestAlertFiresExactlyOnce` guards this - keep it passing.
-- `Filter` drops all-day events; they are never "the next meeting".
+- `Filter` drops all-day events; they are never "the next meeting" and never
+  alert. `FilterAllDay` keeps them apart in `State.AllDay`, which only the
+  tray agenda reads, listed first as "All day".
 
 ## Running in the background
 
