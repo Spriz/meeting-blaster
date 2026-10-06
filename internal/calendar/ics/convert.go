@@ -37,6 +37,10 @@ func event(ev *ical.VEvent, src Source, start time.Time, dur time.Duration, isAl
 	location := text(ev, ical.ComponentPropertyLocation)
 	notes := text(ev, ical.ComponentPropertyDescription)
 
+	// Every UI surface formats Start and End as they are, so a UTC
+	// DTSTART would otherwise be shown in UTC.
+	start = start.Local()
+
 	return calendar.Event{
 		// Keep the feed-local ID separate from shared UID/RecurrenceID identity.
 		ID:           uid + "/" + start.UTC().Format("20060102T150405Z"),

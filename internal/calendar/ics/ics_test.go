@@ -417,3 +417,41 @@ func describe(events []calendar.Event) string {
 	}
 	return b.String()
 }
+
+// TestUTCStartIsShownInLocalTime guards the tray and overlay, which format
+// Event.Start directly: a Google feed writes DTSTART in UTC, and a 13:00
+// Copenhagen meeting was listed as 11:00.
+func TestUTCStartIsShownInLocalTime(t *testing.T) {
+	cph, err := time.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		t.Skipf("no tzdata for Europe/Copenhagen: %v", err)
+	}
+	prev := time.Local
+	time.Local = cph
+	t.Cleanup(func() { time.Local = prev })
+
+	src := writeFeed(t, `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Google Inc//Google Calendar 70.9054//EN
+BEGIN:VEVENT
+UID:utc@example.com
+DTSTAMP:20261001T000000Z
+DTSTART:20261006T110000Z
+DTEND:20261006T113000Z
+SUMMARY:GitHub / Prio
+END:VEVENT
+END:VCALENDAR
+`)
+
+	from := time.Date(2026, 10, 6, 0, 0, 0, 0, cph)
+	events := eventsFrom(t, src, from, from.AddDate(0, 0, 1))
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1: %s", len(events), describe(events))
+	}
+	if got := events[0].Start.Format("15:04"); got != "13:00" {
+		t.Errorf("start formats as %s, want local 13:00", got)
+	}
+	if got := events[0].End.Format("15:04"); got != "13:30" {
+		t.Errorf("end formats as %s, want local 13:30", got)
+	}
+}
